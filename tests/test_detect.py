@@ -317,3 +317,18 @@ def test_light_grey_paper_on_a_light_grey_desk_is_the_known_gap():
         f"the gap is closed ({found}/{scenes_checked}) - retire this test and "
         "fold the tint back into the sweep above"
     )
+
+
+def test_quad_fitting_does_not_require_numpy_2d_cross(monkeypatch):
+    """Support-line fitting must work when NumPy rejects 2D cross products."""
+    from app.core.detect import _fit_quad
+
+    def reject_cross(*args, **kwargs):
+        raise AssertionError("use the scalar 2D determinant instead")
+
+    monkeypatch.setattr(np, "cross", reject_cross)
+    angles = np.linspace(0, 2 * np.pi, 60, endpoint=False)
+    contour = np.column_stack((200 + 100 * np.cos(angles),
+                               200 + 80 * np.sin(angles))).astype(np.float32)
+    result = _fit_quad(contour.reshape(-1, 1, 2))
+    assert result is None or (result.shape == (4, 2) and np.isfinite(result).all())

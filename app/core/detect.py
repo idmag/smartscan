@@ -405,10 +405,12 @@ def _fit_quad(contour: np.ndarray) -> np.ndarray | None:
                 for m in range(k + 1, count):
                     lines = [supports[i], supports[j], supports[k], supports[m]]
                     # Reject near-parallel pairs: a page needs two distinct axes.
+                    # Explicit 2D determinant: newer NumPy versions only
+                    # accept three-dimensional vectors in np.cross.
+                    n0 = lines[0][0]
                     if min(
-                        abs(np.cross(lines[0][0], lines[1][0])),
-                        abs(np.cross(lines[0][0], lines[2][0])),
-                        abs(np.cross(lines[0][0], lines[3][0])),
+                        abs(n0[0] * n[1] - n0[1] * n[0])
+                        for n, _ in lines[1:]
                     ) < 0.15:
                         continue
                     corners = []
