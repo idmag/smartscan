@@ -1,0 +1,106 @@
+name: Build Windows installer
+
+# Builds SmartScan.exe and SmartScan-Setup-<version>.exe on a real Windows
+# runner.  Runs on every push to main or a release tag, and can be started
+# manually from the Actions tab.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      # The GUI is only exercised through Qt in offscreen mode; OpenCV and the
+      # image pipeline are pure CPU and run fine on Linux.
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+  build:
+    name: Build installer (Windows)
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path app/main.py -Pattern 'setApplicationVersion\("([^"]+)"\)').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "SmartScan version $v"
+
+      - name: Build executable
+        run: pyinstaller packaging/smartscan.spec --noconfirm --log-level=WARN
+
+      - name: Smoke-test the executable
+        shell: pwsh
+        run: |
+          # Start the app offscreen, let it initialise, then close it.  A missing
+          # Qt plugin or a broken import crashes immediately and fails the build.
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath "dist/SmartScan/SmartScan.exe" -PassThru
+          Start-Sleep -Seconds 20
+          if ($p.HasExited) {
+            Write-Host "SmartScan exited during startup (code $($p.ExitCode))."
+            exit 1
+          }
+          Write-Host "SmartScan stayed running for 20s ($($p.Id))."
+          Stop-Process -Id $p.Id -Force
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "packaging\inno\smartscan.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartScan-Setup-${{ steps.version.outputs.version }}
+          path: dist/SmartScan-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach installer to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SmartScan-Setup-*.exe
+          generate_release_notes: true

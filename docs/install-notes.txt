@@ -1,0 +1,29 @@
+SmartScan 1.0.0
+===============
+
+Before you install
+------------------
+* Windows 10 or 11, 64-bit.
+* Python is NOT required - everything needed is inside this installer.
+* The application is installed for the current user, so no administrator
+  password is needed. You can still choose "install for all users" on the
+  first page if you prefer.
+
+After installing
+----------------
+1. Start SmartScan from the Start menu (or the desktop shortcut).
+2. The first time you scan, choose the folder your scans should be saved to:
+   click "Change..." next to "Save to", or File > Choose output folder.
+   SmartScan remembers it.
+3. Click "Add photos...", pick a photo of your documents, check the blue
+   outlines, then click "Scan & Save".
+
+Need more detail?
+-----------------
+Open "HOW-TO-USE" from the Start menu, press F1 inside the app, or read
+HOW-TO-USE.md in the installation folder.
+
+Uninstalling
+------------
+Settings > Apps > SmartScan > Uninstall. Your scans and your saved settings
+are not removed.

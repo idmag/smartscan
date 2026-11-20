@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build output
+build/
+dist/
+*.spec.bak
+packaging/linux-deps/.build/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local scratch
+image-search/
+*.log

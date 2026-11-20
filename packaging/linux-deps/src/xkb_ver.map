@@ -1,0 +1,14 @@
+V_0.5.0 {
+  global: xkb_context_new; xkb_context_unref; xkb_context_ref; xkb_context_set_log_level; xkb_context_set_log_fn;
+  xkb_keymap_new_from_names; xkb_keymap_new_from_string; xkb_keymap_unref; xkb_keymap_ref; xkb_keymap_get_as_string;
+  xkb_keymap_min_keycode; xkb_keymap_max_keycode; xkb_keymap_key_for_each; xkb_keymap_key_get_name; xkb_keymap_key_by_name;
+  xkb_keymap_num_layouts; xkb_keymap_num_layouts_for_key; xkb_keymap_num_levels_for_key; xkb_keymap_key_get_syms_by_level;
+  xkb_keymap_layout_get_name; xkb_keymap_mod_get_index; xkb_keymap_num_mods; xkb_keymap_num_leds;
+  xkb_state_new; xkb_state_unref; xkb_state_ref; xkb_state_update_key; xkb_state_update_mask;
+  xkb_state_key_get_layout; xkb_state_key_get_level; xkb_state_key_get_syms; xkb_state_key_get_one_sym;
+  xkb_state_key_get_utf8; xkb_state_key_get_utf32; xkb_state_serialize_layout; xkb_state_serialize_mods;
+  xkb_state_mod_name_is_active; xkb_state_mod_index_is_active; xkb_state_layout_index_is_active;
+  xkb_state_key_get_keyname; xkb_state_get_keymap;
+  xkb_keysym_from_name; xkb_keysym_to_utf8; xkb_keysym_to_utf32; xkb_utf32_to_keysym;
+  local: *;
+};
