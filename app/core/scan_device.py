@@ -24,6 +24,7 @@ error classification.  The GUI thread only ever calls :func:`list_devices` and
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -156,10 +157,15 @@ try {
         [void]$log.Add("page $count saved")
         if (-not $feeder) { break }
         # WIA throws when the ADF runs dry; that is the normal end of a batch.
-        if ($device.Properties.Exists("3088")) {
-            $status = [int]$device.Properties.Item("3088").Value
-            if ($status -ne 1 -and $status -ne 5) { break }
-        }
+        # The status probe is best-effort: many drivers omit property 3088 and
+        # a missing property must not abort a healthy batch.
+        $status = -1
+        try {
+            if ($device.Properties.Exists("3088")) {
+                $status = [int]$device.Properties.Item("3088").Value
+            }
+        } catch { $status = -1 }
+        if ($status -ne -1 -and $status -ne 1 -and $status -ne 5) { break }
         Start-Sleep -Milliseconds 400
     }
     [pscustomobject]@{ ok = $true; pages = $count; feeder = $feeder; log = $log } |
@@ -180,6 +186,31 @@ try {
 """
 
 
+def powershell_command(exe: str, script_path: str, arguments: list[str]) -> list[str]:
+    """Build the command line that runs a script file with arguments.
+
+    The script must be a **file** passed with ``-File``, never text after
+    ``-Command``: PowerShell swallows everything following ``-Command`` as part
+    of the command text, so arguments disappear and stray tokens are parsed as
+    operators (a trailing ``--`` produced "Missing expression after unary
+    operator").  ``-File`` passes arguments through to ``$args`` as documented.
+
+    Kept separate so a test can assert the ordering.
+    """
+    return [
+        exe,
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy", "Bypass",
+        "-File", str(script_path),
+        *[str(a) for a in arguments],
+    ]
+
+
+def _powershell_exe() -> str:
+    return shutil.which("powershell.exe") or shutil.which("powershell") or "powershell.exe"
+
+
 def _run_powershell(script: str, arguments: list[str], timeout: float = 300.0) -> str:
     """Run *script* in PowerShell, passing *arguments* via ``$args``."""
     if not IS_WINDOWS:
@@ -187,42 +218,80 @@ def _run_powershell(script: str, arguments: list[str], timeout: float = 300.0) -
             "Scanning from a scanner is only available on Windows.",
             "Use \"Add photos\" to import images the scanner's own software saved.",
         )
-    exe = shutil.which("powershell.exe") or shutil.which("powershell") or "powershell.exe"
-    command = [
-        exe,
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy", "Bypass",
-        "-Command",
-        script,
-        "--",
-        *arguments,
-    ]
-    creation = 0
-    if hasattr(subprocess, "CREATE_NO_WINDOW"):
-        creation = subprocess.CREATE_NO_WINDOW  # do not flash a console window
-
+    # A UTF-8 BOM keeps non-ASCII device names intact on PowerShell 5.1, which
+    # otherwise assumes the system ANSI code page for BOM-less script files.
+    handle = tempfile.NamedTemporaryFile(
+        "w", suffix=".ps1", delete=False, encoding="utf-8-sig"
+    )
     try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            creationflags=creation,
+        handle.write(script)
+        handle.close()
+        command = powershell_command(_powershell_exe(), handle.name, arguments)
+        creation = 0
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            creation = subprocess.CREATE_NO_WINDOW  # do not flash a console window
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                creationflags=creation,
+            )
+        except subprocess.TimeoutExpired as exc:  # pragma: no cover - hardware path
+            raise ScannerError(
+                "The scanner did not finish in time.",
+                "Check that the scanner is switched on and connected, then try again.",
+            ) from exc
+    finally:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+
+    stdout = (completed.stdout or "").strip()
+    stderr = (completed.stderr or "").strip()
+    if not stdout:
+        raise _diagnose_powershell_failure(stderr or "", completed.returncode)
+    return stdout
+
+
+def _diagnose_powershell_failure(stderr: str, returncode: int) -> ScannerError:
+    """Turn a silent PowerShell run into a message that names the real culprit.
+
+    A failure inside *our* script (a syntax error, a blocked policy) must never
+    be reported as a scanner problem - that sends the user hunting for a loose
+    cable when the bug is ours.
+    """
+    lowered = stderr.lower()
+    if "parsererror" in lowered or "missingexpression" in lowered:
+        first = next((ln.strip() for ln in stderr.splitlines() if ln.strip()), "")
+        return ScannerError(
+            "The scanner helper script failed to run.",
+            f"{first[:300]}\n\nThis is a SmartScan problem, not a scanner problem - "
+            "please report it.",
         )
-    except subprocess.TimeoutExpired as exc:  # pragma: no cover - hardware path
-        raise ScannerError(
-            "The scanner did not finish in time.",
-            "Check that the scanner is switched on and connected, then try again.",
-        ) from exc
-    output = (completed.stdout or "").strip()
-    if not output:
-        detail = (completed.stderr or "").strip()
-        raise ScannerError(
-            "Windows did not answer the scanner.",
-            detail[:400] or "Check that the scanner is switched on and connected.",
+    if (
+        "executionpolicy" in lowered
+        or "not digitally signed" in lowered
+        or "running scripts is disabled" in lowered
+        or "scripts is disabled on this system" in lowered
+    ):
+        return ScannerError(
+            "Windows blocked the scanner helper script.",
+            "Your organisation's PowerShell policy is blocking scripts. Ask an "
+            "administrator, or use \"Add photos\" for images saved by the scanner "
+            "software.",
         )
-    return output
+    if stderr:
+        return ScannerError(
+            "Windows could not run the scanner helper.",
+            stderr.splitlines()[0][:300],
+        )
+    return ScannerError(
+        "Windows did not answer the scanner.",
+        "Check that the scanner is switched on and connected, then try again.",
+    )
 
 
 def _last_json_object(text: str) -> dict:
