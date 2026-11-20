@@ -2,8 +2,8 @@
 # Format: https://learn.microsoft.com/windows/win32/api/verrsrc/ns-verrsrc-vs_fixedfileinfo
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 1, 2, 0),
-    prodvers=(1, 1, 2, 0),
+    filevers=(1, 1, 4, 0),
+    prodvers=(1, 1, 4, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,          # VOS__WINDOWS32
