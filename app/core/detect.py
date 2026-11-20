@@ -171,10 +171,11 @@ def detect_documents(image: np.ndarray, *, work_max_side: int = WORK_MAX_SIDE) -
         contrast = interior_contrast(gray, det.quad)
         magnitude = abs(contrast)
         floor = DARKER_CONTRAST_MIN if contrast < 0 else BRIGHTER_CONTRAST_MIN
-        if magnitude < floor:
-            # Not enough separation either way: an internal text box, a shadow
-            # or mask noise.  (Measured: a page's own boxes reach -17, real
-            # cards on a scanner measure 41-53.)
+        if magnitude < floor and not _smooth_on_textured(gray, det.quad):
+            # Not enough brightness separation, and the surroundings do not
+            # look like a textured surface with a smooth sheet on it either:
+            # an internal text box, a shadow or mask noise.  (Measured: a
+            # page's own boxes reach -17, real cards on a scanner measure 41-53.)
             continue
         if det.score < 0.45:
             # Geometrically weak candidates need a real edge behind them.  A
@@ -404,10 +405,12 @@ def _fit_quad(contour: np.ndarray) -> np.ndarray | None:
                 for m in range(k + 1, count):
                     lines = [supports[i], supports[j], supports[k], supports[m]]
                     # Reject near-parallel pairs: a page needs two distinct axes.
+                    # Explicit 2D determinant: newer NumPy versions only
+                    # accept three-dimensional vectors in np.cross.
+                    n0 = lines[0][0]
                     if min(
-                        abs(np.cross(lines[0][0], lines[1][0])),
-                        abs(np.cross(lines[0][0], lines[2][0])),
-                        abs(np.cross(lines[0][0], lines[3][0])),
+                        abs(n0[0] * n[1] - n0[1] * n[0])
+                        for n, _ in lines[1:]
                     ) < 0.15:
                         continue
                     corners = []
@@ -606,11 +609,57 @@ def interior_contrast(gray: np.ndarray, quad: np.ndarray) -> float:
 BRIGHTER_CONTRAST_MIN = 35.0
 DARKER_CONTRAST_MIN = 28.0
 
+# Paper is smooth; a tabletop is not.  Where brightness cannot separate the two
+# (white paper on a light-grey desk measures 15-31 grey levels, below
+# BRIGHTER_CONTRAST_MIN), texture still can: the page's high-frequency energy
+# is a small fraction of the desk's.  The ring must be *gently* textured to
+# count - ink on a page also leaves a smooth interior with a busy ring around
+# it, and the amplitude is what tells the two apart (desks 2-7 grey levels,
+# text rings 15 and up).
+TEXTURE_RATIO_MAX = 0.45
+TEXTURE_SURROUND_MIN = 1.5
+TEXTURE_SURROUND_MAX = 8.0
+
 # Candidates covering at least this fraction of the frame are the ones that can
 # plausibly be documents; they (not specks) set the support reference scale.
 SUBSTANTIAL_AREA = 0.02
 # How much of a candidate's final score comes from sitting on a real edge.
 SUPPORT_WEIGHT = 0.55
+
+
+def paper_texture(gray: np.ndarray, quad: np.ndarray) -> tuple[float, float] | None:
+    """High-frequency energy inside *quad* and in the ring just outside it.
+
+    Returns ``(inside, outside)`` in grey levels, or ``None`` when the quad is
+    too small or too close to the frame edge to have a usable ring.  Paper is
+    smooth at this scale; wood grain, cloth and printed surfaces are not.
+    """
+    cv2 = _cv()
+    h, w = gray.shape[:2]
+    mask = np.zeros((h, w), np.uint8)
+    cv2.fillPoly(mask, [np.round(quad).astype(np.int32)], 255)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    inner = cv2.erode(mask, kernel, iterations=2)
+    outer = cv2.dilate(mask, kernel, iterations=3)
+    ring = (outer > 0) & (inner == 0)
+    if not np.any(inner > 0) or not np.any(ring):
+        return None
+    gray_f = gray.astype(np.float32)
+    # A fixed 3 px blur is a fixed physical scale only up to the working-size
+    # cap, which keeps the working image between 600 and WORK_MAX_SIDE px.
+    high = np.abs(gray_f - cv2.GaussianBlur(gray_f, (0, 0), 3.0))
+    return float(np.median(high[inner > 0])), float(np.median(high[ring]))
+
+
+def _smooth_on_textured(gray: np.ndarray, quad: np.ndarray) -> bool:
+    """A smooth sheet lying on a gently textured surface (a plain table)."""
+    stats = paper_texture(gray, quad)
+    if stats is None:
+        return False
+    inside, outside = stats
+    if outside < TEXTURE_SURROUND_MIN or outside > TEXTURE_SURROUND_MAX:
+        return False
+    return inside / outside <= TEXTURE_RATIO_MAX
 
 
 def _suppress(detections: list[Detection], iou_threshold: float = 0.30) -> list[Detection]:

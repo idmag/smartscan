@@ -209,3 +209,126 @@ def test_internal_boxes_on_a_cropped_scan_are_not_documents():
         assert det.area_fraction > 0.85, (
             f"small internal box accepted: area={det.area_fraction:.3f}"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Low-contrast photographs: paper that is only slightly lighter than a plain
+# desk.  The brightness gate alone cannot decide these; the surface's texture
+# is the evidence that separates a smooth sheet from a tabletop.
+# --------------------------------------------------------------------------- #
+def test_white_paper_on_a_light_grey_desk_is_found():
+    """Measured 15-31 grey levels of contrast: under the 35-level floor."""
+    scene = scenes.compose(
+        1100, 1300, [dict(shape="a6", x=0.5, y=0.5, angle=3, tint=(210, 208, 200))],
+        bg="gray", seed=11,
+    )
+    result = detect_documents(scene.image)
+    matched, _ = scenes.match_detections([d.quad for d in result.detections], scene.quads)
+    assert matched == 1, f"contrast was too low to accept; {len(result.detections)} found"
+
+
+def test_pale_paper_on_a_wooden_desk_is_found():
+    scene = scenes.compose(
+        1100, 1300, [dict(shape="a5", x=0.5, y=0.5, angle=3, tint=(225, 225, 220))],
+        bg="wood", seed=21,
+    )
+    result = detect_documents(scene.image)
+    matched, _ = scenes.match_detections([d.quad for d in result.detections], scene.quads)
+    assert matched == 1
+
+
+def test_empty_desks_never_become_documents():
+    """The texture evidence must not turn a bare tabletop into paper."""
+    for bg in ("wood", "gray", "dark"):
+        for seed in range(1, 5):
+            empty = scenes.background(1100, 1300, bg, seed=seed)
+            assert detect_documents(empty).detections == [], f"invented a page on {bg}/{seed}"
+
+
+def test_internal_boxes_stay_rejected_on_a_low_contrast_scene():
+    """Same low-contrast desk, but the 'document' is a box inside a page."""
+    page = scenes.render_page((600, 440), tint=(240, 238, 232), seed=3)
+    canvas = scenes.background(1300, 1100, "gray", seed=11)
+    h, w = page.shape[:2]
+    canvas[300:300 + h, 220:220 + w] = page
+    for det in detect_documents(canvas).detections:
+        # Only the whole photographed page is a document; boxes inside it are not.
+        assert det.area_fraction > 0.05, f"accepted an internal box: {det.area_fraction:.3f}"
+
+
+# Bright white through to a light recycled grey, where brightness alone stops
+# being enough to separate paper from the desk.
+_SWEEP_TINTS = [(250, 249, 244), (240, 236, 225), (225, 225, 220)]
+
+
+@pytest.mark.parametrize("bg", ["wood", "dark", "gray"])
+def test_paper_on_any_desk_is_found_for_every_shape(bg):
+    """A sweep, not a lucky scene: every paper shape, on every desk surface.
+
+    The tints run from bright white down to a light recycled grey, which is
+    where brightness alone stops being enough.  Shape coverage matters: a
+    small, text-dense card gives the masks far less to work with than A5.
+    """
+    misses = []
+    for seed in (1, 2):
+        for tint in _SWEEP_TINTS:
+            if bg == "gray" and tint[0] == 225:
+                continue  # the known gap, pinned by its own test above
+            for k, shape in enumerate(("a5", "a6", "receipt", "card")):
+                scene = scenes.compose(
+                    1100, 1300, [dict(shape=shape, x=0.5, y=0.5, angle=3, tint=tint)],
+                    bg=bg, seed=seed * 10 + k,
+                )
+                result = detect_documents(scene.image)
+                matched, _ = scenes.match_detections(
+                    [d.quad for d in result.detections], scene.quads
+                )
+                if not (matched == 1 and len(result.detections) == 1):
+                    misses.append((tint[0], shape, seed))
+    assert not misses, f"{len(misses)} scenes missed on {bg}: {misses}"
+
+
+def test_light_grey_paper_on_a_light_grey_desk_is_the_known_gap():
+    """Pinned as a measurement, not a wish: most scenes pass, some do not.
+
+    The limiting factor is resolution, not logic.  In a 1100 px scene the 3 px
+    high-pass that measures surface roughness straddles paper (2.4 grey levels
+    of noise) and desk (3.2) too closely to be decisive.  Recording the real
+    number means an improvement shows up as a failure here, prompting an
+    update rather than silent drift.
+    """
+    found = 0
+    scenes_checked = 0
+    for seed in (1, 2, 3):
+        for k, shape in enumerate(("a5", "a6", "receipt", "card")):
+            scene = scenes.compose(
+                1100, 1300,
+                [dict(shape=shape, x=0.5, y=0.5, angle=3, tint=(225, 225, 220))],
+                bg="gray", seed=seed * 10 + k,
+            )
+            result = detect_documents(scene.image)
+            matched, _ = scenes.match_detections(
+                [d.quad for d in result.detections], scene.quads
+            )
+            scenes_checked += 1
+            found += matched == 1 and len(result.detections) == 1
+    assert found >= 9, f"regressed: only {found}/{scenes_checked} found"
+    assert found < scenes_checked, (
+        f"the gap is closed ({found}/{scenes_checked}) - retire this test and "
+        "fold the tint back into the sweep above"
+    )
+
+
+def test_quad_fitting_does_not_require_numpy_2d_cross(monkeypatch):
+    """Support-line fitting must work when NumPy rejects 2D cross products."""
+    from app.core.detect import _fit_quad
+
+    def reject_cross(*args, **kwargs):
+        raise AssertionError("use the scalar 2D determinant instead")
+
+    monkeypatch.setattr(np, "cross", reject_cross)
+    angles = np.linspace(0, 2 * np.pi, 60, endpoint=False)
+    contour = np.column_stack((200 + 100 * np.cos(angles),
+                               200 + 80 * np.sin(angles))).astype(np.float32)
+    result = _fit_quad(contour.reshape(-1, 1, 2))
+    assert result is None or (result.shape == (4, 2) and np.isfinite(result).all())

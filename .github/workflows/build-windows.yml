@@ -33,7 +33,22 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q
+        run: python -m pytest -q --junitxml=test-results.xml
+      - name: Annotate test failures
+        if: failure()
+        run: |
+          python - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+          report = pathlib.Path("test-results.xml")
+          if report.exists():
+              for case in ET.parse(report).iter("testcase"):
+                  for kind in ("failure", "error"):
+                      for failure in case.findall(kind):
+                          message = f"{case.get('classname')}.{case.get('name')}: {failure.text}"
+                          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                          print(f"::error::{message}")
+          PY
 
   build:
     name: Build installer (Windows)

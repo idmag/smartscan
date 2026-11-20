@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..core import guidance
 from ..core.detect import Detection, detect_documents
 from ..core.naming import validate_template
 from ..core.scanner import Page, scan_many, save_pages
@@ -461,7 +462,7 @@ class MainWindow(QMainWindow):
         if paths:
             self.load_paths([Path(p) for p in paths])
 
-    def load_paths(self, paths: list[Path]) -> None:
+    def load_paths(self, paths: list[Path], *, origin: str = "photo") -> None:
         loaded = 0
         for path in paths:
             try:
@@ -472,12 +473,13 @@ class MainWindow(QMainWindow):
             if image is None:
                 QMessageBox.warning(self, "Could not open image", f"{path.name} is not a readable image.")
                 continue
-            self._add_doc(DocPage(path=path, image=image))
+            self._add_doc(DocPage(path=path, image=image, origin=origin))
             loaded += 1
         if loaded:
             self.select_photo(len(self.docs) - 1)
+            noun = "page" if origin == "scan" else "photo"
             self.statusBar().showMessage(
-                f"Added {loaded} photo{'s' if loaded != 1 else ''}.", 4000
+                f"Added {loaded} {noun}{'s' if loaded != 1 else ''}.", 4000
             )
 
     # ------------------------------------------------------------ scanner
@@ -492,7 +494,7 @@ class MainWindow(QMainWindow):
             # The images sit in a temp folder this process owns; it is removed
             # when the app exits, so DocPage.path stays valid meanwhile.
             keep_for_session(dialog.page_files)
-            self.load_paths([Path(p) for p in dialog.page_files])
+            self.load_paths([Path(p) for p in dialog.page_files], origin="scan")
             n = len(dialog.page_files)
             self.statusBar().showMessage(
                 f"Scanned {n} page{'s' if n != 1 else ''}.", 5000
@@ -513,14 +515,16 @@ class MainWindow(QMainWindow):
         if arr is None or arr.size == 0:
             self.statusBar().showMessage("The pasted image is empty.", 4000)
             return
-        self._add_doc(DocPage(path=path, image=arr))
+        self._add_doc(DocPage(path=path, image=arr, origin="clipboard"))
         self.select_photo(len(self.docs) - 1)
         self.statusBar().showMessage("Pasted image added.", 3000)
 
     def _add_doc(self, doc: DocPage) -> None:
         self.docs.append(doc)
         thumb = ndarray_to_qpixmap(_fit_thumbnail(doc.image, 80))
-        self.photo_panel.add_photo(doc.name, f"{doc.size_label} pixels", thumb)
+        self.photo_panel.add_photo(
+            doc.name, f"{doc.size_label} pixels", thumb, origin=doc.origin
+        )
         self.empty_state.setVisible(False)
 
     def remove_current(self) -> None:
@@ -623,16 +627,9 @@ class MainWindow(QMainWindow):
         self._refresh_current_view()
         n = len(detections)
         if n == 0:
-            self.statusBar().showMessage(
-                "No documents found — try a photo with better lighting and contrast.", 7000
-            )
+            self.statusBar().showMessage(guidance.empty_status(doc.is_scan), 7000)
             QMessageBox.information(
-                self,
-                "No documents found",
-                "SmartScan could not find a document outline in this photo.\n\n"
-                "Tips:\n• Keep the whole document inside the frame\n"
-                "• Use a plain, contrasting background\n"
-                "• Avoid heavy shadows across the paper",
+                self, "No documents found", guidance.empty_help(doc.is_scan)
             )
         else:
             self.statusBar().showMessage(
