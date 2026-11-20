@@ -75,42 +75,50 @@ jobs:
       - name: Exercise the scanner bridge on real Windows
         shell: pwsh
         run: |
-          # This is the guard for the 1.1.0 bug: the WIA script was passed
-          # after -Command, so PowerShell parsed it as code and every scan
-          # failed on the user's machine while the build stayed green.
-          # Here the bridge is actually invoked against real Windows.
-          python -c "import sys; sys.path.insert(0, '.'); from app.core import scan_device; print('IS_WINDOWS:', scan_device.IS_WINDOWS)"
-          python -c @"
+          # Guard for the 1.1.0 bug: the WIA script was passed after -Command,
+          # so PowerShell parsed it as code and every scan failed on the user's
+          # machine while the build stayed green.  Run the bridge for real.
+          $script = @'
           import sys
-          sys.path.insert(0, '.')
+          sys.path.insert(0, ".")
+
+          def step(name):
+              print(f"== {name}")
+
+          step("command line")
           from app.core import scan_device
+          cmd = scan_device.powershell_command("powershell.exe", "x.ps1", ["a", "b"])
+          assert "-Command" not in cmd, cmd
+          assert cmd[cmd.index("-File") + 1] == "x.ps1", cmd
+          print("   ok:", " ".join(cmd[1:]))
 
-          # 1. The command line must use -File, never -Command.
-          cmd = scan_device.powershell_command('powershell.exe', 'x.ps1', ['a', 'b'])
-          assert '-Command' not in cmd, cmd
-          assert cmd[cmd.index('-File') + 1] == 'x.ps1'
-          print('command line ok')
-
-          # 2. Arguments must really reach the script's \$args.  This runs
-          #    PowerShell for real, which is what the unit tests cannot do.
+          step("argument passing")
           out = scan_device._run_powershell(
-              'param()  Write-Output ("{0}|{1}" -f \$args[0], \$args[1])',
-              ['alpha', 'beta'],
+              "Write-Output (\"{0}|{1}\" -f $args[0], $args[1])",
+              ["alpha", "beta"],
               timeout=60,
           )
-          print('script said:', out.strip())
-          assert 'alpha|beta' in out, out
-          print('argument passing ok')
+          print("   script said:", out.strip())
+          assert "alpha|beta" in out, out
 
-          # 3. Discovery must return a parseable answer (no scanner on a
-          #    hosted runner is fine; a crash or a parse error is not).
+          step("discovery")
           try:
               devices = scan_device.list_devices()
-              print('devices:', devices)
+              print("   devices:", devices)
           except scan_device.ScannerError as exc:
-              print('ScannerError (acceptable here):', exc.message)
-          print('scanner bridge ok')
-          "@
+              print("   ScannerError (expected on a runner with no scanner):", exc.message)
+
+          print("SCANNER BRIDGE OK")
+          '@
+          $script | Out-File -FilePath bridge_check.py -Encoding utf8
+          python bridge_check.py
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error title=Scanner bridge check failed::python bridge_check.py exited $LASTEXITCODE"
+            exit 1
+          }
+
+      - name: Run the scan-device tests on Windows
+        run: python -m pytest tests/test_scan_device.py -q
 
       - name: Build executable
         run: pyinstaller packaging/smartscan.spec --noconfirm --log-level=WARN
