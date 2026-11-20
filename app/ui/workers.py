@@ -115,6 +115,33 @@ class ScanWorker(_BaseWorker):
 
 
 @dataclass
+class DiagnosticsResult:
+    """A text report describing one scanner, for troubleshooting."""
+
+    ok: bool = False
+    text: str = ""
+    error: str = ""
+
+
+class DiagnoseWorker(_BaseWorker):
+    """Collects the driver's property table (blocking; runs off the GUI thread)."""
+
+    def __init__(self, device) -> None:
+        super().__init__()
+        self.device = device
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            text = scan_device.diagnose(self.device)
+            self._emit(DiagnosticsResult(ok=True, text=text))
+        except scan_device.ScannerError as exc:
+            self._emit(DiagnosticsResult(ok=False, error=exc.user_text()))
+        except Exception as exc:  # noqa: BLE001
+            self._fail(exc)
+
+
+@dataclass
 class ScannerJobResult:
     """What a :class:`ScanDeviceWorker` produced (images stay on disk)."""
 
@@ -231,6 +258,11 @@ def run_scanner(pool: QThreadPool, device, callback, error_callback=None,
 
 def run_device_list(pool: QThreadPool, callback, error_callback=None) -> DeviceListWorker:
     worker = DeviceListWorker()
+    return _start(pool, worker, callback, error_callback)
+
+
+def run_diagnose(pool: QThreadPool, device, callback, error_callback=None) -> DiagnoseWorker:
+    worker = DiagnoseWorker(device)
     return _start(pool, worker, callback, error_callback)
 
 

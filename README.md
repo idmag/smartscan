@@ -24,7 +24,7 @@ wizard.
 ## Install (Windows)
 
 1. Download
-   [`SmartScan-Setup-1.1.1.exe`](https://github.com/idmag/smartscan/releases/download/v1.1.1/SmartScan-Setup-1.1.1.exe)
+   [`SmartScan-Setup-1.1.2.exe`](https://github.com/idmag/smartscan/releases/download/v1.1.2/SmartScan-Setup-1.1.2.exe)
    from the [Releases](../../releases) page.
 2. Run it and follow the wizard. No administrator rights are needed for a per-user
    install; Python does not need to be installed.
@@ -59,11 +59,11 @@ python -m venv .venv
 .venv\Scripts\activate                 # Windows;  source .venv/bin/activate elsewhere
 pip install -r requirements-dev.txt    # PySide6, OpenCV, numpy, Pillow, pytest, PyInstaller
 
-python -m pytest                       # 69 tests, synthetic photos, no fixtures
+python -m pytest                       # 82 tests, synthetic photos, no fixtures
 python run_smartscan.py                # run from source
 
 pyinstaller packaging/smartscan.spec --noconfirm   # -> dist/SmartScan/SmartScan.exe
-iscc packaging/inno/smartscan.iss                  # -> dist/SmartScan-Setup-1.1.1.exe
+iscc packaging/inno/smartscan.iss                  # -> dist/SmartScan-Setup-1.1.2.exe
 ```
 
 (The PyInstaller build must run on Windows — it cannot cross-compile — which is why the
@@ -73,7 +73,7 @@ Scanner support needs no extra dependency: it uses `WIA` through PowerShell, whi
 with Windows (so it is exercised by the Windows build, not the Linux tests).
 
 `pyinstaller` builds `dist/SmartScan/SmartScan.exe` (one-folder build, so startup is
-fast); Inno Setup wraps it into a single installer. Pushing a tag such as `v1.1.1`
+fast); Inno Setup wraps it into a single installer. Pushing a tag such as `v1.1.2`
 runs `.github/workflows/build-windows.yml`, which produces the installer as a build
 artifact and attaches it to a GitHub release.
 

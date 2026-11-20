@@ -1,10 +1,10 @@
 ; Inno Setup script for SmartScan.
 ; Build the application first:   pyinstaller packaging/smartscan.spec --noconfirm
 ; Then compile this file:        iscc packaging/inno/smartscan.iss
-; Result:                        dist/SmartScan-Setup-1.1.1.exe
+; Result:                        dist/SmartScan-Setup-1.1.2.exe
 
 #define AppName        "SmartScan"
-#define AppVersion     "1.1.1"
+#define AppVersion     "1.1.2"
 #define AppPublisher   "SmartScan"
 #define AppExeName     "SmartScan.exe"
 #define SourceDir      "..\..\dist\SmartScan"

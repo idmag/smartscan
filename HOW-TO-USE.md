@@ -32,6 +32,9 @@ SmartScan uses the scanner support built into Windows (WIA), so no extra driver 
 software is needed beyond what Windows already installed for your scanner. If no
 scanner is listed, check it is switched on and connected, then press **Look again**.
 
+If a scan fails, press **Diagnose…** and save the report — it lists what your scanner
+driver supports, which is what's needed to fix it.
+
 ## The output folder
 
 Use **Change…** next to **Save to**, **File → Choose output folder…** (Ctrl+D), or

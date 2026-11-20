@@ -14,8 +14,11 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QLabel,
+    QMessageBox,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -23,7 +26,14 @@ from PySide6.QtWidgets import (
 from ..core.settings import Settings, save_settings
 from ..core.scan_device import DEFAULT_DPI, DPI_CHOICES, ScannerDevice, ScannerError, list_devices
 from .theme import ACCENT
-from .workers import DeviceListWorker, ScannerJobResult, run_device_list, run_scanner
+from .workers import (
+    DeviceListWorker,
+    DiagnosticsResult,
+    ScannerJobResult,
+    run_device_list,
+    run_diagnose,
+    run_scanner,
+)
 
 
 class ScanDeviceDialog(QDialog):
@@ -71,6 +81,14 @@ class ScanDeviceDialog(QDialog):
             "Close", QDialogButtonBox.ButtonRole.RejectRole
         )
         self.rescan_button.setVisible(False)
+        # Constructed with the other buttons but placed in the button box below,
+        # left of Scan, so it reads as a utility rather than a primary action.
+        self.diagnose_button = QPushButton("Diagnose…")
+        self.diagnose_button.setToolTip(
+            "Save a report describing what this scanner driver supports"
+        )
+        self.diagnose_button.setEnabled(False)
+        self.diagnose_button.clicked.connect(self._diagnose_clicked)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 12)
@@ -78,6 +96,9 @@ class ScanDeviceDialog(QDialog):
         layout.addWidget(self.intro)
         layout.addLayout(form)
         layout.addWidget(self.hint)
+        self.buttons.addButton(
+            self.diagnose_button, QDialogButtonBox.ButtonRole.ResetRole
+        )
         layout.addWidget(self.buttons)
 
         self.buttons.accepted.connect(self._scan_clicked)
@@ -118,6 +139,7 @@ class ScanDeviceDialog(QDialog):
         self.scan_button.setEnabled(True)
         self.device_combo.setEnabled(True)
         self.dpi_combo.setEnabled(True)
+        self.diagnose_button.setEnabled(True)
         self.intro.setText(
             "Load the pages in the scanner, then press Scan. "
             "A document feeder will pull every page it finds."
@@ -137,6 +159,7 @@ class ScanDeviceDialog(QDialog):
         self.device_combo.setEnabled(False)
         self.scan_button.setEnabled(False)
         self.rescan_button.setVisible(False)
+        self.diagnose_button.setEnabled(False)
         self.intro.setText(
             "SmartScan uses the scanner support built into Windows (WIA)."
         )
@@ -215,8 +238,11 @@ class ScanDeviceDialog(QDialog):
         self.page_files = [Path(p) for p in result.pages]
         self._temp_dirs = sorted({str(p.parent) for p in self.page_files})
         pages = len(self.page_files)
+        note = ""
+        if result.warnings:
+            note = " " + result.warnings[0]
         self.intro.setText(
-            f"Scanned {pages} page{'s' if pages != 1 else ''}. "
+            f"Scanned {pages} page{'s' if pages != 1 else ''}.{note} "
             "Press Scan again for more, or Close to work on these pages."
         )
         self.hint.setVisible(False)
@@ -230,6 +256,55 @@ class ScanDeviceDialog(QDialog):
         self.scan_button.setEnabled(True)
         self.intro.setText("The scanner stopped unexpectedly.")
         self._show_problem("The scan failed.", message.splitlines()[0])
+
+    # -------------------------------------------------------- diagnostics
+    def _current_device(self) -> ScannerDevice | None:
+        device_id = self.device_combo.currentData()
+        return next((d for d in self._devices if d.device_id == device_id), None)
+
+    def _diagnose_clicked(self) -> None:
+        device = self._current_device()
+        if device is None:
+            return
+        self.diagnose_button.setEnabled(False)
+        self.diagnose_button.setText("Reading driver…")
+        self._diagnose_worker = run_diagnose(
+            self.pool, device, self._on_diagnosed, self._on_diagnose_error
+        )
+
+    def _on_diagnosed(self, result) -> None:
+        self.diagnose_button.setEnabled(True)
+        self.diagnose_button.setText("Diagnose…")
+        if isinstance(result, DiagnosticsResult) and not result.ok:
+            QMessageBox.warning(self, "Diagnose scanner", result.error)
+            return
+        text = result.text if isinstance(result, DiagnosticsResult) else str(result)
+        target, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save scanner report",
+            str(Path.home() / "smartscan-scanner-report.txt"),
+            "Text files (*.txt)",
+        )
+        if not target:
+            return
+        try:
+            Path(target).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not save the report", str(exc))
+            return
+        self.hint.setVisible(False)
+        QMessageBox.information(
+            self,
+            "Scanner report saved",
+            f"Saved to:\n{target}\n\n"
+            "Send this file with any bug report — it lists exactly which settings "
+            "the scanner driver accepts.",
+        )
+
+    def _on_diagnose_error(self, message: str) -> None:
+        self.diagnose_button.setEnabled(True)
+        self.diagnose_button.setText("Diagnose…")
+        QMessageBox.warning(self, "Diagnose scanner", message.splitlines()[0])
 
     # ------------------------------------------------------------ helpers
     def _set_busy(self, busy: bool) -> None:
