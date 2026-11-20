@@ -51,16 +51,18 @@ Requires Python 3.10+ and, for the installer, [Inno Setup 6](https://jrsoftware.
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate            # Windows;  source .venv/bin/activate elsewhere
-pip install -r requirements.txt
-pip install pyinstaller
+.venv\Scripts\activate                 # Windows;  source .venv/bin/activate elsewhere
+pip install -r requirements-dev.txt    # PySide6, OpenCV, numpy, Pillow, pytest, PyInstaller
 
-python -m pytest                  # 39 tests, synthetic photos, no external fixtures
-python run_smartscan.py           # run from source
+python -m pytest                       # 39 tests, synthetic photos, no fixtures
+python run_smartscan.py                # run from source
 
-pyinstaller packaging/smartscan.spec --noconfirm
-iscc packaging/inno/smartscan.iss  # -> dist/SmartScan-Setup-1.0.0.exe
+pyinstaller packaging/smartscan.spec --noconfirm   # -> dist/SmartScan/SmartScan.exe
+iscc packaging/inno/smartscan.iss                  # -> dist/SmartScan-Setup-1.0.0.exe
 ```
+
+(The PyInstaller build must run on Windows — it cannot cross-compile — which is why the
+GitHub workflow does it on a `windows-latest` runner.)
 
 `pyinstaller` builds `dist/SmartScan/SmartScan.exe` (one-folder build, so startup is
 fast); Inno Setup wraps it into a single installer. Pushing a tag such as `v1.0.0`
