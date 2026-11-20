@@ -139,3 +139,73 @@ def test_detections_sorted_reading_order():
     centers = [d.center for d in result.detections]
     assert centers[0][1] < centers[2][1]
     assert centers[0][0] < centers[1][0]
+
+
+# ------------------------------------------------------ flatbed scans (1.1.3)
+# A scan is the opposite of a photo: the scanner's lid is white, so a coloured
+# or grey document is *darker* than its background.  1.1.x required "brighter
+# than the surroundings" and rejected every such scan, however clean its edge.
+# Reported from a real HP LaserJet M1005 scan of a yellow India Post postcard.
+def test_yellow_postcard_on_white_lid_is_found():
+    scene = scenes.compose_scan(
+        1000, 1300,
+        [dict(shape="postcard", x=0.5, y=0.5, angle=2, tint=(60, 190, 235))],
+        seed=1,
+    )
+    result = detect_documents(scene.image)
+    pred = [d.quad for d in result.detections]
+    matched, mean_iou = scenes.match_detections(pred, scene.quads)
+    assert matched == 1, f"expected the postcard, got {len(pred)} detections"
+    assert mean_iou > 0.93
+
+
+def test_grey_card_on_white_lid_is_found():
+    scene = scenes.compose_scan(
+        1000, 1300,
+        [dict(shape="a6", x=0.48, y=0.52, angle=-4, tint=(205, 205, 203))],
+        seed=3,
+    )
+    result = detect_documents(scene.image)
+    pred = [d.quad for d in result.detections]
+    matched, _ = scenes.match_detections(pred, scene.quads)
+    assert matched == 1, f"expected the grey card, got {len(pred)} detections"
+
+
+def test_two_postcards_on_the_scanner_are_both_found():
+    """Two cards on an open bed, each found on its own.
+
+    The second card is light cream rather than pure white: paper only a few
+    grey levels from the lid is a known limitation (see `DARKER_CONTRAST_MIN`),
+    so the scene stays one a human could also separate at a glance.
+    """
+    scene = scenes.compose_scan(
+        1200, 1300,
+        [dict(shape="postcard", x=0.30, y=0.32, angle=1, width=0.40,
+              tint=(60, 190, 235)),
+         dict(shape="postcard", x=0.72, y=0.70, angle=-2, width=0.40,
+              tint=(200, 196, 190))],
+        seed=5,
+    )
+    result = detect_documents(scene.image)
+    pred = [d.quad for d in result.detections]
+    matched, _ = scenes.match_detections(pred, scene.quads)
+    assert matched == 2, f"matched {matched}/2; {len(pred)} detections"
+
+
+def test_blank_scanner_lid_produces_nothing():
+    """The empty bed must not invent documents."""
+    from app.core.detect import detect_documents as detect
+
+    blank = scenes.scanner_bed(1000, 1300, seed=9)
+    assert detect(blank).detections == []
+
+
+def test_internal_boxes_on_a_cropped_scan_are_not_documents():
+    """A pre-cropped scan has crisp internal edges; they must stay rejected."""
+    page = scenes.render_page((420, 595))
+    canvas = np.full((620, 440, 3), 30, np.uint8)
+    canvas[12:607, 10:430] = page
+    for det in detect_documents(canvas).detections:
+        assert det.area_fraction > 0.85, (
+            f"small internal box accepted: area={det.area_fraction:.3f}"
+        )

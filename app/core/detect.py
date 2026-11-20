@@ -82,6 +82,11 @@ class DetectionResult:
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
+# Raw edge support of the candidates being validated, keyed by id().
+# Detection runs on one thread and fills this at the start of every call.
+_LOCAL_SUPPORT: dict[int, float] = {}
+
+
 def detect_documents(image: np.ndarray, *, work_max_side: int = WORK_MAX_SIDE) -> DetectionResult:
     """Detect all document quads in a BGR (or gray) image."""
     cv2 = _cv()
@@ -128,24 +133,60 @@ def detect_documents(image: np.ndarray, *, work_max_side: int = WORK_MAX_SIDE) -
     if scored:
         stats = [edge_support_stats(gx, gy, d.quad) for d in scored]
         raw_support = [0.5 * s_mean + 0.5 * s_p25 for s_mean, s_p25 in stats]
-        reference = float(np.percentile(raw_support, 90)) or 1.0
+        # Reference = the 90th percentile **of candidates that are big enough
+        # to be a document**.  Taking it over every candidate lets a few tiny
+        # high-contrast specks on a scanner lid (area 0.5%, support ~110) set
+        # the scale, which then rates a real page at 13/110 and NMS discards
+        # it.  Photos have large high-contrast edges, so they are unaffected.
+        substantial = [
+            raw
+            for det, raw in zip(scored, raw_support)
+            if det.area_fraction >= SUBSTANTIAL_AREA
+        ]
+        pool = substantial or raw_support
+        reference = float(np.percentile(pool, 90)) or 1.0
+        _LOCAL_SUPPORT.clear()
         for det, support_raw in zip(scored, raw_support):
+            _LOCAL_SUPPORT[id(det)] = support_raw
             support = min(1.0, support_raw / reference)
-            det.score = min(1.0, 0.55 * det.score + 0.45 * support)
+            # Support carries most of the weight when geometry cannot separate
+            # the candidates (two overlapping pages, a scan on a plain lid).
+            det.score = min(1.0, (1.0 - SUPPORT_WEIGHT) * det.score + SUPPORT_WEIGHT * support)
 
     deduped = _suppress(scored)
 
-    # Keep only quads that actually look like a sheet of paper: noticeably
-    # brighter than their surroundings, with a real edge around them.
-    # Real paper on a desk is far brighter than its surroundings (measured in
-    # tens of grey levels); shadows and wood grain are not.  The threshold sits
-    # well clear of both populations.
+    # Keep only quads that stand out from their surroundings as a sheet of
+    # paper does.  Two shapes of evidence, because there are two kinds of input:
+    #
+    #  * Photograph: light paper on a darker surface - a large POSITIVE step.
+    #  * Flatbed scan: the document lies on the scanner's own lid, which is
+    #    usually white, so a coloured or grey document is DARKER than the
+    #    surroundings.  Requiring a positive step (as 1.1.x did) threw away
+    #    every scan whose paper was not near-white, however clean its outline.
+    #
+    # Both are accepted, but a darker-than-surroundings quad needs a proper
+    # edge, because "darker and rectangular" would otherwise admit shadows.
     validated: list[Detection] = []
     for det in deduped:
         contrast = interior_contrast(gray, det.quad)
-        if contrast >= 35.0:
-            det.score = min(1.0, det.score + min(0.12, contrast / 400.0))
-            validated.append(det)
+        magnitude = abs(contrast)
+        floor = DARKER_CONTRAST_MIN if contrast < 0 else BRIGHTER_CONTRAST_MIN
+        if magnitude < floor:
+            # Not enough separation either way: an internal text box, a shadow
+            # or mask noise.  (Measured: a page's own boxes reach -17, real
+            # cards on a scanner measure 41-53.)
+            continue
+        if det.score < 0.45:
+            # Geometrically weak candidates need a real edge behind them.  A
+            # quad darker than the lid is by definition *not* the sheet of
+            # white paper the masks were tuned for, so it must prove itself
+            # with a much crisper outline - otherwise an internal box on a
+            # pre-cropped page gets through on edge strength alone.
+            support = _LOCAL_SUPPORT.get(id(det), 0.0)
+            if support < (60.0 if contrast >= 0 else 140.0):
+                continue
+        det.score = min(1.0, det.score + min(0.12, magnitude / 400.0))
+        validated.append(det)
     deduped = validated
 
     # Snap each accepted quad onto its edge, inwards only: masks tend to bleed
@@ -519,11 +560,14 @@ def _make_detection(quad: np.ndarray, total_area: float, contour_hint=None) -> D
 
 
 def interior_contrast(gray: np.ndarray, quad: np.ndarray) -> float:
-    """How much brighter the quad's interior is than a ring just outside it.
+    """Signed brightness difference: quad interior minus a ring outside it.
 
-    Documents are bright objects on a darker surface.  This cheap measure
-    rejects shadow patches, wood-grain stripes and other "rectangle-shaped
-    nothings" that survive the mask stage.  Units are grey levels.
+    Positive for light paper on a dark desk (a photo); **negative** for a
+    coloured postcard lying on the white lid of a flatbed scanner.  Callers
+    that only care how strong the separation is should use ``abs()`` of this,
+    as the acceptance gate does - 1.1.x compared it against a positive floor
+    only, and so rejected every scan whose paper was not near-white.  Units are
+    grey levels.
     """
     cv2 = _cv()
     h, w = gray.shape[:2]
@@ -548,6 +592,25 @@ def interior_contrast(gray: np.ndarray, quad: np.ndarray) -> float:
         return 0.0
     outside = float(roi[ring].mean())
     return inside - outside
+
+
+# A real sheet differs from its surroundings by a large brightness step.
+# Measured on synthetic photos and flatbed simulations:
+#   photo, light paper on a desk ............ +50 to +190
+#   scan, card on a white lid ............... -41 to -59
+#   shadows, wood grain, mask noise .........  7 to 16
+#   internal text boxes on a pre-cropped page  -17 to +29
+# Brightness *upwards* therefore needs 35 grey levels, while a document darker
+# than its background (a scan on a white lid) needs 28: that direction is only
+# plausible on a scanner, where the lid is uniform, so the bar can be lower.
+BRIGHTER_CONTRAST_MIN = 35.0
+DARKER_CONTRAST_MIN = 28.0
+
+# Candidates covering at least this fraction of the frame are the ones that can
+# plausibly be documents; they (not specks) set the support reference scale.
+SUBSTANTIAL_AREA = 0.02
+# How much of a candidate's final score comes from sitting on a real edge.
+SUPPORT_WEIGHT = 0.55
 
 
 def _suppress(detections: list[Detection], iou_threshold: float = 0.30) -> list[Detection]:

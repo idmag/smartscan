@@ -23,8 +23,10 @@ PAPER_SHAPES = {
     "receipt": (200, 640),
     "card": (340, 214),
     "letter": (612, 792),
+    "postcard": (400, 280),
 }
-PAPER_MM = {"a5": 148.0, "a6": 105.0, "receipt": 80.0, "card": 85.6, "letter": 215.9}
+PAPER_MM = {"a5": 148.0, "a6": 105.0, "receipt": 80.0, "card": 85.6,
+            "letter": 215.9, "postcard": 148.0}
 
 
 @dataclass
@@ -225,3 +227,62 @@ def match_detections(pred: list[np.ndarray], truth: list[np.ndarray],
         used_t.add(j)
         ious.append(iou)
     return len(ious), float(np.mean(ious)) if ious else 0.0
+
+
+def scanner_bed(w: int = 1000, h: int = 1300, *, seed: int = 0,
+                bed: int = 246, vignette: float = 0.06) -> np.ndarray:
+    """A blank flatbed lid: near-white, faint noise, slight vignette.
+
+    This is what a scanner delivers before the document is accounted for, and
+    it is why detection cannot assume "the document is brighter than its
+    surroundings" - on a scanner the *background* is the brightest thing.
+    """
+    rng = np.random.default_rng(seed)
+    img = np.full((h, w, 3), bed, np.float32)
+    img += rng.normal(0, 1.2, img.shape).astype(np.float32)
+    yy, xx = np.mgrid[0:h, 0:w]
+    falloff = 1.0 - vignette * (((yy - h / 2) ** 2 + (xx - w / 2) ** 2) / (h * h + w * w) * 4)
+    img *= falloff[..., None]
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def compose_scan(w: int = 1000, h: int = 1300, papers: list[dict] | None = None,
+                 *, seed: int = 0, bed: int = 246, vignette: float = 0.06):
+    """Simulate a flatbed scan: documents lying on the scanner's white lid.
+
+    Unlike :func:`compose`, the background is brighter than most paper, and
+    documents can be tinted anything - a yellow postcard is the case that
+    exposed the 1.1.x "brighter than its surroundings" assumption.
+    """
+    canvas = scanner_bed(w, h, seed=seed, bed=bed, vignette=vignette)
+    rng = np.random.default_rng(seed + 101)
+    quads: list[np.ndarray] = []
+    for i, spec in enumerate(papers or []):
+        shape = PAPER_SHAPES[spec["shape"]]
+        page = render_page(
+            shape,
+            tint=spec.get("tint", (250, 249, 244)),
+            font_scale=spec.get("font_scale", 1.0),
+            seed=seed + i,
+        )
+        ph, pw = page.shape[:2]
+        # Placement is by fraction of the bed, like compose(); `width` is the
+        # document's width as a fraction of the bed (default: a postcard).
+        width = spec.get("width", 0.42)
+        scale = spec.get("scale", 1.0) * width * w / pw
+        angle = rng.uniform(-1.5, 1.5) if spec.get("angle") is None else spec["angle"]
+        quad = _random_quad(
+            spec["x"] * w,
+            spec["y"] * h,
+            pw * scale,
+            ph * scale,
+            angle,
+            rng,
+            jitter=0.01,  # a document lies flat on the glass
+        )
+        src = np.float32([[0, 0], [pw, 0], [pw, ph], [0, ph]])
+        matrix = cv2.getPerspectiveTransform(src, quad.astype(np.float32))
+        # No drop shadow: nothing casts one onto scanner glass.
+        canvas = _warp_into(canvas, page, matrix, quad)
+        quads.append(quad)
+    return Scene(image=canvas, quads=quads)

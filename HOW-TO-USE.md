@@ -32,6 +32,11 @@ SmartScan uses the scanner support built into Windows (WIA), so no extra driver 
 software is needed beyond what Windows already installed for your scanner. If no
 scanner is listed, check it is switched on and connected, then press **Look again**.
 
+Documents are found whether they are lighter or darker than what they lie on, so a
+coloured card on a white scanner lid works. Paper that is almost exactly the lid's own
+white — a few grey levels away — cannot be separated from it; lay a coloured sheet
+behind such pages.
+
 If a scan fails, press **Diagnose…** and save the report — it lists what your scanner
 driver supports, which is what's needed to fix it.
 
