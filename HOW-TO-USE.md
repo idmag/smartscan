@@ -1,0 +1,63 @@
+# How to use SmartScan
+
+SmartScan turns a photo of several small documents into clean, straightened scans and
+saves them to your folder.
+
+## The four steps
+
+1. **Add photos** — click **Add photos…** (Ctrl+O), drag image files onto the window, or
+   paste a screenshot with **Ctrl+V**. One photo can hold several documents.
+2. **Check the outlines** — every document is found automatically and outlined in blue;
+   the right pane previews the straightened page. Drag a corner handle to fix an outline,
+   or press **Re-detect** (Ctrl+R) to try again.
+3. **Drop what you don't want** — select a page in the strip along the bottom and press
+   **E** (or **Exclude**).
+4. **Scan & Save** — press **Scan & Save** (Ctrl+S). The pages are straightened, cleaned
+   up, and written to the output folder.
+
+## The output folder
+
+Use **Change…** next to **Save to**, **File → Choose output folder…** (Ctrl+D), or
+**Settings** (Ctrl+,). SmartScan remembers your choice, so you only do this once.
+**Open folder** shows the results. The default is `Documents\SmartScan`.
+
+## Cleanup modes
+
+| Mode | Use it for |
+| --- | --- |
+| **Auto** | Start here — Color when the document has photos or stamps, Gray otherwise. |
+| **Color** | Natural colour on a white background. |
+| **Gray** | Photocopier look; small files. |
+| **B&W** | Maximum contrast for plain text; smallest PDFs. |
+| **Original** | Straightening only, everything else untouched. |
+
+## File formats
+
+Pick the format in **Settings**. **PDF** puts the whole batch into one multi-page
+document; **JPG**, **PNG** and **TIFF** save one file per page. All scans are 300 DPI.
+File names follow a template, for example `Scan_2026-11-20_14-05-33_1.pdf`.
+
+## Getting the best results
+
+- Lay the documents flat, **not overlapping**, fully inside the photo.
+- A background that contrasts with the paper detects best — a dark desk or a coloured mat.
+- Photograph from above; avoid strong shadows and glare.
+- More megapixels give sharper scans.
+
+## Keyboard shortcuts
+
+| Keys | Action |
+| --- | --- |
+| Ctrl+O | Add photos |
+| Ctrl+V | Paste an image |
+| Ctrl+R | Re-detect documents in the current photo |
+| Ctrl+S | Scan & Save |
+| Ctrl+D | Choose the output folder |
+| ← / → | Previous / next page or photo |
+| E | Exclude / include the selected document |
+| Delete | Remove the selected photo |
+| Ctrl+, | Settings |
+| F1 | This guide |
+
+The same guide is in the app under **Help → How to use** (F1), and as
+`HOW-TO-USE.txt` next to the installed program.

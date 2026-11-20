@@ -1,0 +1,165 @@
+name: Build Windows installer
+
+# Builds SmartScan.exe and SmartScan-Setup-<version>.exe on a real Windows
+# runner.  Runs on every push to main or a release tag, and can be started
+# manually from the Actions tab.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      # The GUI is only exercised through Qt in offscreen mode; OpenCV and the
+      # image pipeline are pure CPU and run fine on Linux.
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+  build:
+    name: Build installer (Windows)
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path app/main.py -Pattern 'setApplicationVersion\("([^"]+)"\)').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "SmartScan version $v"
+
+      - name: Build executable
+        run: pyinstaller packaging/smartscan.spec --noconfirm --log-level=WARN
+
+      - name: Smoke-test the executable
+        shell: pwsh
+        run: |
+          # Start the app offscreen, let it initialise, then close it.  A missing
+          # Qt plugin or a broken import crashes immediately and fails the build.
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $exe = "dist/SmartScan/SmartScan.exe"
+          if (-not (Test-Path $exe)) { Write-Host "Missing $exe"; exit 1 }
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 20
+          if ($p.HasExited) {
+            Write-Host "SmartScan exited during startup (code $($p.ExitCode))."
+            exit 1
+          }
+          Write-Host "SmartScan stayed running for 20s (pid $($p.Id))."
+          Stop-Process -Id $p.Id -Force
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "C:\Program Files\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { Write-Host "ISCC.exe not found"; exit 1 }
+          Write-Host "Using $iscc"
+          & $iscc "packaging\inno\smartscan.iss" 2>&1 | Tee-Object -FilePath iscc.log
+          if ($LASTEXITCODE -ne 0) {
+            # Surface just the compiler's diagnostics: the full log is long and
+            # check-run annotations truncate, so filter before reporting.
+            $lines = Get-Content iscc.log | Where-Object {
+              $_ -match 'Error|error|Warning|warning|Failed|failed|Line \d+|\[Files\]|\[Icons\]|\[Run\]|\[Registry\]'
+            }
+            $err = ($lines -join " | ")
+            $err = $err.Substring(0, [Math]::Min(3000, $err.Length))
+            Write-Host "::error title=Inno Setup failed::$err"
+            exit 1
+          }
+          Get-ChildItem dist\*.exe | Format-Table Name, Length
+
+      - name: Smoke-test the installer
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\SmartScan-Setup-*.exe | Select-Object -First 1
+          $dir = Join-Path $env:LOCALAPPDATA "SmartScanInstallTest"
+          Write-Host "Installing $($setup.Name) to $dir"
+          $proc = Start-Process -FilePath $setup.FullName -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+            "/DIR=$dir", "/LOG=$env:TEMP\install.log"
+          ) -PassThru -Wait
+          if ($proc.ExitCode -ne 0) {
+            Get-Content "$env:TEMP\install.log" -Tail 40
+            Write-Host "::error title=Installer failed::exit code $($proc.ExitCode)"
+            exit 1
+          }
+          $exe = Join-Path $dir "SmartScan.exe"
+          foreach ($f in @($exe, (Join-Path $dir "HOW-TO-USE.md"), (Join-Path $dir "assets\smartscan.ico"))) {
+            if (-not (Test-Path $f)) {
+              Write-Host "::error title=Installer incomplete::missing $f"
+              exit 1
+            }
+          }
+          Get-ChildItem $dir -Recurse -File | Measure-Object -Property Length -Sum |
+            ForEach-Object { Write-Host ("Installed {0} files, {1:N0} bytes" -f $_.Count, $_.Sum) }
+          # The installed copy must start too (catches a missing DLL next to the exe).
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) {
+            Write-Host "::error title=Installed app crashed::exit code $($p.ExitCode)"
+            exit 1
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "Installed app started and stayed running."
+          $uninst = Join-Path $dir "unins000.exe"
+          if (Test-Path $uninst) {
+            Start-Process -FilePath $uninst -ArgumentList @(
+              "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+            ) -Wait
+            Write-Host "Uninstalled."
+          }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartScan-Setup-${{ steps.version.outputs.version }}
+          path: dist/SmartScan-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach installer to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SmartScan-Setup-*.exe
+          generate_release_notes: true

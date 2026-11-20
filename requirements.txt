@@ -1,0 +1,9 @@
+# Runtime requirements.  OpenCV is the headless build: the GUI comes from Qt,
+# and the full opencv-python wheel duplicates Qt's own libraries on Windows.
+PySide6>=6.6,<6.9
+opencv-python-headless>=4.8,<5
+numpy>=1.24,<3
+Pillow>=10
+
+# Development / build only:
+#   pip install -r requirements-dev.txt
