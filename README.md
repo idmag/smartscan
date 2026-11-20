@@ -24,7 +24,7 @@ wizard.
 ## Install (Windows)
 
 1. Download
-   [`SmartScan-Setup-1.1.3.exe`](https://github.com/idmag/smartscan/releases/download/v1.1.3/SmartScan-Setup-1.1.3.exe)
+   [`SmartScan-Setup-1.1.4.exe`](https://github.com/idmag/smartscan/releases/download/v1.1.4/SmartScan-Setup-1.1.4.exe)
    from the [Releases](../../releases) page.
 2. Run it and follow the wizard. No administrator rights are needed for a per-user
    install; Python does not need to be installed.
@@ -63,7 +63,7 @@ python -m pytest                       # 82 tests, synthetic photos, no fixtures
 python run_smartscan.py                # run from source
 
 pyinstaller packaging/smartscan.spec --noconfirm   # -> dist/SmartScan/SmartScan.exe
-iscc packaging/inno/smartscan.iss                  # -> dist/SmartScan-Setup-1.1.3.exe
+iscc packaging/inno/smartscan.iss                  # -> dist/SmartScan-Setup-1.1.4.exe
 ```
 
 (The PyInstaller build must run on Windows — it cannot cross-compile — which is why the
@@ -73,7 +73,7 @@ Scanner support needs no extra dependency: it uses `WIA` through PowerShell, whi
 with Windows (so it is exercised by the Windows build, not the Linux tests).
 
 `pyinstaller` builds `dist/SmartScan/SmartScan.exe` (one-folder build, so startup is
-fast); Inno Setup wraps it into a single installer. Pushing a tag such as `v1.1.3`
+fast); Inno Setup wraps it into a single installer. Pushing a tag such as `v1.1.4`
 runs `.github/workflows/build-windows.yml`, which produces the installer as a build
 artifact and attaches it to a GitHub release.
 
@@ -83,7 +83,7 @@ artifact and attaches it to a GitHub release.
 | --- | --- | --- |
 | Candidate masks | `app/core/detect.py` | Five independent segmentations (brightness, adaptive threshold at two scales, saturation, Canny edges). Each large contour becomes a quadrilateral. |
 | Scoring | `app/core/detect.py` | A page is *convex*, has roughly parallel opposite sides, sane corner angles, and — the decisive test — real image gradients along all four of its sides. Scoring by edge support happens **before** duplicate suppression so a merged blob of two touching pages cannot swallow either of them. |
-| Validation | `app/core/detect.py` | Interior must differ clearly from the surrounding ring — brighter (paper on a desk) **or** darker (a coloured or grey document on a white scanner lid) — and a weaker candidate must also sit on a real edge. |
+| Validation | `app/core/detect.py` | Interior must differ clearly from the surrounding ring — brighter (paper on a desk) **or** darker (a coloured or grey document on a white scanner lid) — or be markedly smoother than a gently textured surface (white paper on a pale desk). A weaker candidate must also sit on a real edge. |
 | Refinement | `app/core/detect.py` | Each side is snapped onto the strongest nearby gradient, inwards only. |
 | Warp | `app/core/perspective.py` | Destination-only resize to the page's own aspect ratio, optional outward margin, automatic portrait rotation. |
 | Clean-up | `app/core/enhance.py` | Gray-world white balance, CLAHE, and Otsu binarisation for B&W. |

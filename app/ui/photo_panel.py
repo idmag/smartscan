@@ -34,6 +34,15 @@ def _placeholder_icon(size: int = 40) -> QIcon:
     return QIcon(pm)
 
 
+# Where a page came from, shown next to its name: a scan and a photo need
+# different advice when nothing is found, and the list keeps that visible.
+_SOURCE_LABELS = {
+    "scan": "scanner",
+    "clipboard": "clipboard",
+    "photo": "",
+}
+
+
 class PhotoPanel(QWidget):
     """Thumbnail list + add/remove buttons."""
 
@@ -95,9 +104,12 @@ class PhotoPanel(QWidget):
         if row >= 0:
             self.remove_requested.emit(row)
 
-    def add_photo(self, name: str, detail: str, thumb: QPixmap | None = None) -> None:
-        item = QListWidgetItem(name)
-        item.setToolTip(f"{name}\n{detail}")
+    def add_photo(self, name: str, detail: str, thumb: QPixmap | None = None,
+                  *, origin: str = "photo") -> None:
+        source = _SOURCE_LABELS.get(origin, "")
+        item = QListWidgetItem(f"{name}   {source}" if source else name)
+        item.setToolTip(f"{name} ({source})\n{detail}" if source else f"{name}\n{detail}")
+        item.setData(Qt.ItemDataRole.UserRole, origin)
         if thumb is not None and not thumb.isNull():
             item.setIcon(QIcon(thumb))
         else:

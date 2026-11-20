@@ -17,6 +17,7 @@ class DocPage:
 
     path: Path | None
     image: np.ndarray                      # BGR full resolution
+    origin: str = "photo"                  # "photo" | "scan" | "clipboard"
     detections: list[Detection] = field(default_factory=list)
     pages: list[Page] = field(default_factory=list)
     excluded: set[int] = field(default_factory=set)   # detection indices excluded
@@ -27,6 +28,19 @@ class DocPage:
     @property
     def name(self) -> str:
         return self.path.name if self.path else "Clipboard image"
+
+    @property
+    def is_scan(self) -> bool:
+        """True when the page came straight off a flatbed or feeder.
+
+        Detection advice differs: on a scan the background is the scanner's
+        own lid, which the user cannot change by "improving the lighting".
+        """
+        return self.origin == "scan"
+
+    @property
+    def source_label(self) -> str:
+        return "scr" if self.is_scan else "ph"
 
     @property
     def size_label(self) -> str:
