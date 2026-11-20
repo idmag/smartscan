@@ -118,7 +118,17 @@ jobs:
           }
 
       - name: Run the scan-device tests on Windows
-        run: python -m pytest tests/test_scan_device.py -q
+        shell: pwsh
+        run: |
+          # Windows is the only platform where the WIA path is real, so these
+          # tests must pass here too.
+          python -m pytest tests/test_scan_device.py -q 2>&1 | Tee-Object -FilePath pytest-win.log
+          if ($LASTEXITCODE -ne 0) {
+            $failed = (Get-Content pytest-win.log | Select-String -Pattern '^(FAILED|E  )' |
+              Select-Object -First 12) -join ' | '
+            Write-Host "::error title=scan-device tests failed on Windows::$failed"
+            exit 1
+          }
 
       - name: Build executable
         run: pyinstaller packaging/smartscan.spec --noconfirm --log-level=WARN
