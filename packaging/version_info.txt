@@ -2,8 +2,8 @@
 # Format: https://learn.microsoft.com/windows/win32/api/verrsrc/ns-verrsrc-vs_fixedfileinfo
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 1, 0, 0),
-    prodvers=(1, 1, 0, 0),
+    filevers=(1, 1, 1, 0),
+    prodvers=(1, 1, 1, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,          # VOS__WINDOWS32
@@ -19,12 +19,12 @@ VSVersionInfo(
           [
             StringStruct('CompanyName', 'SmartScan'),
             StringStruct('FileDescription', 'SmartScan document scanner'),
-            StringStruct('FileVersion', '1.1.0.0'),
+            StringStruct('FileVersion', '1.1.1.0'),
             StringStruct('InternalName', 'SmartScan'),
             StringStruct('LegalCopyright', 'MIT Licence'),
             StringStruct('OriginalFilename', 'SmartScan.exe'),
             StringStruct('ProductName', 'SmartScan'),
-            StringStruct('ProductVersion', '1.1.0'),
+            StringStruct('ProductVersion', '1.1.1'),
           ],
         )
       ]

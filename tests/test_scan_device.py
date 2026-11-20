@@ -20,11 +20,14 @@ from app.core.scan_device import (
     AcquireResult,
     ScannerDevice,
     ScannerError,
+    _diagnose_powershell_failure,
+    _run_powershell,
     acquire_pages,
     describe_wia_error,
     list_devices,
     parse_acquire_output,
     parse_device_list,
+    powershell_command,
     split_multipage,
 )
 
@@ -178,3 +181,80 @@ def test_acquire_result_defaults_to_empty_warning_list():
 def test_dpi_choices_include_the_app_default():
     assert scan_device.DEFAULT_DPI in scan_device.DPI_CHOICES
     assert scan_device.DEFAULT_DPI == 300
+
+
+# ------------------------------------------------------- command construction
+def test_script_is_run_as_a_file_never_after_dash_command():
+    """Regression: 1.1.0 broke every scan with "Missing expression after '--'".
+
+    PowerShell treats everything after ``-Command`` as command *text*, so a
+    script passed there cannot receive arguments and any extra token is parsed
+    as PowerShell.  The script must go through ``-File``.
+    """
+    command = powershell_command(
+        "powershell.exe", "C:/Temp/smartscan.ps1", []
+    )
+    assert "-Command" not in command
+    assert "-File" in command
+    assert command[command.index("-File") + 1] == "C:/Temp/smartscan.ps1"
+
+
+def test_no_stray_tokens_after_the_arguments():
+    command = powershell_command("powershell.exe", "s.ps1", ["dev", "out", "300", ""])
+    assert command[-4:] == ["dev", "out", "300", ""]
+    # Nothing that PowerShell could read as an operator.
+    assert not any(a == "--" for a in command)
+
+
+def test_arguments_are_stringified():
+    command = powershell_command("powershell.exe", "s.ps1", [300, True])
+    assert command[-2:] == ["300", "True"]
+
+
+def test_arguments_reach_the_script_through_args(monkeypatch, tmp_path):
+    """End-to-end on the script-file mechanism, without needing Windows.
+
+    Replace the PowerShell binary with a shell that mimics ``-File`` +
+    ``$args``: the script must receive every argument, in order.
+    """
+    fake = tmp_path / "fake-ps"
+    # Everything before -File is consumed, exactly like PowerShell does.
+    fake.write_text(
+        '#!/bin/sh\n'
+        'while [ $# -gt 0 ] && [ "$1" != "-File" ]; do shift; done\n'
+        'shift  # the script path itself\n'
+        'echo "{\\"ok\\": true, \\"argv\\": [\\"$@\\"]}"\n'
+    )
+    fake.chmod(0o755)
+    monkeypatch.setattr(scan_device, "IS_WINDOWS", True)
+    monkeypatch.setattr(scan_device, "_powershell_exe", lambda: str(fake))
+
+    output = _run_powershell("ignored", ["first", "second"])
+    assert "first" in output and "second" in output
+    # ...and they arrive in order, after the script path.
+    assert output.index("first") < output.index("second")
+
+
+# --------------------------------------------------- failure classification
+def test_parser_error_is_reported_as_a_smartscan_bug_not_a_scanner_one():
+    err = _diagnose_powershell_failure(
+        "At C:\\Temp\\x.ps1:1 char:1\n+ --\n"
+        "Missing expression after unary operator '--'.\n"
+        "    + CategoryInfo : ParserError",
+        returncode=1,
+    )
+    assert "helper script failed" in err.message.lower()
+    assert "not a scanner problem" in err.hint.lower()
+
+
+def test_execution_policy_block_is_explained():
+    err = _diagnose_powershell_failure(
+        "File cannot be loaded because running scripts is disabled", returncode=1
+    )
+    assert "blocked" in err.message.lower()
+    assert ".ps1 is not digitally signed" in err.hint.lower() or "policy" in err.hint.lower()
+
+
+def test_silent_failure_without_stderr_points_at_the_scanner():
+    err = _diagnose_powershell_failure("", returncode=1)
+    assert "did not answer the scanner" in err.message.lower()
