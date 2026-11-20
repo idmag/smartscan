@@ -27,7 +27,7 @@ def main() -> int:
     app.setApplicationName("SmartScan")
     app.setApplicationDisplayName("SmartScan")
     app.setOrganizationName("SmartScan")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion("1.1.0")
 
     from app.ui.theme import apply_theme
 

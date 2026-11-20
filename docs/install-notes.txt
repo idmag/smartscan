@@ -1,4 +1,4 @@
-SmartScan 1.0.0
+SmartScan 1.1.0
 ===============
 
 Before you install
@@ -12,7 +12,10 @@ Before you install
 After installing
 ----------------
 1. Start SmartScan from the Start menu (or the desktop shortcut).
-2. The first time you scan, choose the folder your scans should be saved to:
+2. If you have a scanner, load the pages and press "Scan from scanner" -
+   the scanner support built into Windows is used, so no extra driver or
+   software is needed.
+3. The first time you save, choose the folder your scans should be saved to:
    click "Change..." next to "Save to", or File > Choose output folder.
    SmartScan remembers it.
 3. Click "Add photos...", pick a photo of your documents, check the blue

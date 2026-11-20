@@ -21,9 +21,10 @@ GUIDE_HTML = """
 <h2>Scanning documents with SmartScan</h2>
 
 <ol>
-  <li><b>Add photos.</b> Click <b>Add photos…</b> (or press <b>Ctrl+O</b>), drag image
-  files into the window, or paste a screenshot with <b>Ctrl+V</b>.
-  You can lay several small documents (receipts, cards, notes, invoices) on one
+  <li><b>Get the images in.</b> Use <b>Scan from scanner…</b> (<b>Ctrl+Shift+N</b>) to pull
+  pages directly from a scanner, or <b>Add photos…</b> (<b>Ctrl+O</b>), drag image files
+  into the window, or paste a screenshot with <b>Ctrl+V</b>.
+  You can also lay several small documents (receipts, cards, notes, invoices) on one
   surface and photograph them together.</li>
   <li><b>Check the outlines.</b> SmartScan finds each document automatically and draws a
   blue outline. The right-hand pane previews the straightened, cleaned-up page.
@@ -33,6 +34,13 @@ GUIDE_HTML = """
   <li><b>Scan &amp; Save.</b> Press <b>Scan &amp; Save</b> (Ctrl+S). Each page is straightened,
   enhanced and written to your folder in the chosen format.</li>
 </ol>
+
+<h3>Scanning from a scanner</h3>
+<p>Press <b>Scan from scanner…</b>, choose the device and a resolution (300 DPI is right for
+most work), then <b>Scan</b>. A document feeder pulls every page in the tray; on a flatbed
+press <b>Scan again</b> for another page. This uses the scanner support built into Windows,
+so no extra software is needed. If no scanner is listed, check it is switched on and
+connected, then press <b>Look again</b>.</p>
 
 <h3>Choosing the output folder</h3>
 <p>SmartScan remembers the folder you pick. Use <b>Change…</b> next to <b>Save to</b>, the
@@ -60,6 +68,7 @@ The toolbar's <b>Folder</b> button opens the folder in Explorer.</p>
 <h3>Keyboard shortcuts</h3>
 <table cellpadding="4">
   <tr><td><b>Ctrl+O</b></td><td>Add photos</td></tr>
+  <tr><td><b>Ctrl+Shift+N</b></td><td>Scan from scanner</td></tr>
   <tr><td><b>Ctrl+V</b></td><td>Paste image</td></tr>
   <tr><td><b>Ctrl+R</b></td><td>Re-detect documents in the current photo</td></tr>
   <tr><td><b>Ctrl+S</b></td><td>Scan &amp; Save</td></tr>
@@ -121,10 +130,10 @@ def write_guide_files(target_dir: Path) -> list[Path]:
     text = (
         "SMARTSCAN - HOW TO USE\n"
         "======================\n\n"
-        "1. Add photos\n"
-        "   Click 'Add photos...' (Ctrl+O), drag image files onto the window,\n"
-        "   or paste a screenshot with Ctrl+V. Several small documents can be\n"
-        "   in one photo.\n\n"
+        "1. Get the images in\n"
+        "   'Scan from scanner...' (Ctrl+Shift+N) pulls pages from a scanner;\n"
+        "   'Add photos...' (Ctrl+O) or drag files; Ctrl+V pastes a screenshot.\n"
+        "   Several small documents can be in one photo.\n\n"
         "2. Check the outlines\n"
         "   Each document is detected automatically and outlined in blue.\n"
         "   The right pane previews the straightened, cleaned-up page.\n"
@@ -134,6 +143,10 @@ def write_guide_files(target_dir: Path) -> list[Path]:
         "4. Scan & Save\n"
         "   Press 'Scan & Save' (Ctrl+S). Pages are written to your folder\n"
         "   as PDF/JPG/PNG/TIFF, named from the pattern in Settings.\n\n"
+        "SCANNER\n"
+        "  Toolbar > 'Scan from scanner', pick the device and 300 DPI, press Scan.\n"
+        "  A document feeder pulls every page; on a flatbed press 'Scan again'.\n"
+        "  Uses the scanner support built into Windows - no extra software.\n\n"
         "OUTPUT FOLDER\n"
         "  'Change...' next to 'Save to', File > Choose output folder (Ctrl+D)\n"
         "  or Settings (Ctrl+,). Default: Documents\\SmartScan.\n\n"
@@ -149,7 +162,8 @@ def write_guide_files(target_dir: Path) -> list[Path]:
         "  - Shoot from above; avoid shadows and glare.\n"
         "  - Higher-resolution photos give sharper scans.\n\n"
         "SHORTCUTS\n"
-        "  Ctrl+O add photos   Ctrl+V paste      Ctrl+R re-detect\n"
+        "  Ctrl+O add photos   Ctrl+Shift+N scanner  Ctrl+V paste\n"
+        "  Ctrl+R re-detect\n"
         "  Ctrl+S scan & save  Ctrl+D folder     Ctrl+, settings\n"
         "  Left/Right pages    E exclude         Delete remove photo\n"
         "  F1 this guide\n"

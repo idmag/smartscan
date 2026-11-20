@@ -5,8 +5,13 @@ saves them to your folder.
 
 ## The four steps
 
-1. **Add photos** — click **Add photos…** (Ctrl+O), drag image files onto the window, or
-   paste a screenshot with **Ctrl+V**. One photo can hold several documents.
+1. **Get the images in** — three ways, all equivalent:
+   - **Scan from scanner…** (Ctrl+Shift+N) pulls pages straight from a scanner connected
+     to this PC, one page or a whole document feeder.
+   - **Add photos…** (Ctrl+O) or drag image files onto the window.
+   - **Ctrl+V** pastes a screenshot.
+
+   One photo can hold several documents.
 2. **Check the outlines** — every document is found automatically and outlined in blue;
    the right pane previews the straightened page. Drag a corner handle to fix an outline,
    or press **Re-detect** (Ctrl+R) to try again.
@@ -14,6 +19,18 @@ saves them to your folder.
    **E** (or **Exclude**).
 4. **Scan & Save** — press **Scan & Save** (Ctrl+S). The pages are straightened, cleaned
    up, and written to the output folder.
+
+## Scanning from a scanner
+
+Press **Scan from scanner…** in the toolbar (or **File → Scan from scanner…**). Pick the
+device, choose a resolution (300 DPI is right for most work), load the pages, and press
+**Scan**. A document feeder pulls every page in the tray; on a flatbed, press **Scan
+again** for the next page. Scanned pages then behave exactly like photos: outlines are
+detected, previewed, and saved with everything else.
+
+SmartScan uses the scanner support built into Windows (WIA), so no extra driver or
+software is needed beyond what Windows already installed for your scanner. If no
+scanner is listed, check it is switched on and connected, then press **Look again**.
 
 ## The output folder
 
