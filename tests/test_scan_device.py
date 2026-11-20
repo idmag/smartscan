@@ -9,6 +9,7 @@ multi-page TIFFs, and failing politely on non-Windows platforms.
 from __future__ import annotations
 
 import json
+import re
 import sys
 
 import numpy as np
@@ -81,8 +82,9 @@ def test_parse_device_list_rejects_garbage():
 
 # ------------------------------------------------------------------- acquire
 def test_parse_acquire_output_collects_pages_in_order(tmp_path):
-    (tmp_path / "page_000.tif").write_bytes(b"x")
-    (tmp_path / "page_001.tif").write_bytes(b"x")
+    # Real, decodable images: acquisition now drops files it cannot read.
+    for name in ("page_000.tif", "page_001.tif"):
+        Image.fromarray(np.zeros((16, 16, 3), dtype=np.uint8)).save(tmp_path / name)
     (tmp_path / "notes.txt").write_text("ignore me")
     result = parse_acquire_output(
         json.dumps({"ok": True, "pages": 2, "feeder": True}), tmp_path
@@ -265,3 +267,129 @@ def test_execution_policy_block_is_explained():
 def test_silent_failure_without_stderr_points_at_the_scanner():
     err = _diagnose_powershell_failure("", returncode=1)
     assert "did not answer the scanner" in err.message.lower()
+
+
+# ------------------------------------------------ WIA constants (regressions)
+# Both 1.1.x scanner faults came from writing a property with the wrong id or
+# value.  These tests pin the ids to WiaDef.h so a future edit cannot quietly
+# reintroduce either bug.
+WIA_DOCUMENTED = {
+    "6146": ("WIA_IPS_CUR_INTENT", "flags: 1=colour, 2=grayscale, 4=black&white"),
+    "6147": ("WIA_IPS_XRES", "horizontal dpi, range/list"),
+    "6148": ("WIA_IPS_YRES", "vertical dpi, range/list"),
+    "6151": ("WIA_IPS_XEXTENT", "horizontal extent in PIXELS - never 0"),
+    "6155": ("WIA_IPS_CONTRAST", "-1000..1000, NOT the lamp"),
+    "3089": ("WIA_IPS_AUTO_DESKEW", "feeder-only list: 0=off, 1=on"),
+}
+
+
+def test_acquisition_never_writes_xextent_or_contrast():
+    """1.1.1 set 6151 (XEXTENT, pixels) to 0, which the driver rejected with
+    E_INVALIDARG, and wrote 6155 as if it were the lamp."""
+    script = scan_device._ACQUIRE_SCRIPT
+    for bogus in ('"6151"', '"6155"'):
+        assert bogus not in script, f"{bogus} must not be written"
+
+
+def test_acquisition_only_sets_documented_required_properties():
+    script = scan_device._ACQUIRE_SCRIPT
+    written = re.findall(r'\$P_[A-Z_]+\s*=\s*"(\d+)"', script)
+    assert written, "expected the property ids to be named constants"
+    for prop_id in written:
+        assert prop_id in WIA_DOCUMENTED, f"undocumented property id {prop_id}"
+    assert set(written) == {"6146", "6147", "6148"}
+
+
+def test_tiff_format_guid_is_the_documented_one():
+    """B96B3CB0 is GIF; TIFF is B96B3CB1.  Writing GIF bytes into a .tif file
+    made every later page unreadable."""
+    script = scan_device._ACQUIRE_SCRIPT
+    assert "{B96B3CB1-0728-11D3-9D7B-0000F81EF32E}" in script  # TIFF
+    assert "CB0-0728" not in script, "B96B3CB0 is GIF, not TIFF"
+
+
+def test_acquire_script_has_a_defaults_fallback():
+    """If the requested settings fail, the driver's untouched defaults are
+    tried before giving up."""
+    script = scan_device._ACQUIRE_SCRIPT
+    assert "used driver defaults" in script
+    assert "info.Connect()" in script  # reconnecting restores defaults
+
+
+def test_acquire_script_retries_at_a_lower_resolution():
+    assert "200" in scan_device._ACQUIRE_SCRIPT
+    assert "scanned at 200 DPI" in scan_device._ACQUIRE_SCRIPT
+
+
+# --------------------------------------------------------- diagnostics report
+def test_diagnose_script_reports_property_ranges():
+    script = scan_device._DIAGNOSE_SCRIPT
+    assert "SubTypeMin" in script and "SubTypeMax" in script
+    assert "SubTypeValues" in script
+    assert "DIAGNOSE OK" in script
+
+
+def test_diagnose_requires_a_device_id(monkeypatch):
+    captured = {}
+
+    def fake_run(script, arguments, timeout=300.0):
+        captured["args"] = arguments
+        return "report text"
+
+    monkeypatch.setattr(scan_device, "_run_powershell", fake_run)
+    device = ScannerDevice(device_id="WIA-XYZ", name="HP LaserJet M1005 MFP")
+    assert scan_device.diagnose(device) == "report text"
+    assert captured["args"] == ["WIA-XYZ"]
+
+
+# ------------------------------------------------------------- page integrity
+def test_verify_page_accepts_a_real_image(tmp_path):
+    path = tmp_path / "page_000.tif"
+    Image.fromarray(np.zeros((16, 16, 3), dtype=np.uint8)).save(path)
+    assert scan_device.verify_page(path) is True
+
+
+def test_verify_page_rejects_a_mislabelled_file(tmp_path):
+    """A BMP renamed to .tif still decodes; gibberish does not."""
+    path = tmp_path / "page_000.tif"
+    path.write_bytes(b"GIF89a not really a tiff")
+    assert scan_device.verify_page(path) is False
+
+
+def test_parse_acquire_output_skips_unreadable_pages(tmp_path):
+    good = tmp_path / "page_000.tif"
+    Image.fromarray(np.zeros((16, 16, 3), dtype=np.uint8)).save(good)
+    (tmp_path / "page_001.tif").write_bytes(b"not an image")
+    result = parse_acquire_output(json.dumps({"ok": True, "pages": 2}), tmp_path)
+    assert [p.name for p in result.pages] == ["page_000.tif"]
+    assert any("unreadable" in w.lower() for w in result.warnings)
+
+
+def test_parse_acquire_output_raises_when_every_page_is_broken(tmp_path):
+    (tmp_path / "page_000.tif").write_bytes(b"not an image")
+    with pytest.raises(ScannerError) as info:
+        parse_acquire_output(json.dumps({"ok": True, "pages": 1}), tmp_path)
+    assert "could not be read" in info.value.message
+    assert "Diagnose" in info.value.hint
+
+
+def test_applied_and_rejected_properties_are_reported(tmp_path):
+    Image.fromarray(np.zeros((16, 16, 3), dtype=np.uint8)).save(tmp_path / "page_000.tif")
+    payload = json.dumps(
+        {
+            "ok": True,
+            "pages": 1,
+            "applied": ["XRES=300"],
+            "rejected": ["YRES=600 (out of range)"],
+        }
+    )
+    result = parse_acquire_output(payload, tmp_path)
+    assert result.applied == ["XRES=300"]
+    assert result.rejected == ["YRES=600 (out of range)"]
+
+
+def test_single_element_arrays_are_normalised():
+    """PowerShell emits a one-item array as a bare string."""
+    assert scan_device._as_list("XRES=300") == ["XRES=300"]
+    assert scan_device._as_list(["a", "b"]) == ["a", "b"]
+    assert scan_device._as_list(None) == []

@@ -104,18 +104,74 @@ try {
 """
 
 # Acquisition.  $args[0] = device id, $args[1] = output folder,
-# $args[2] = dpi, $args[3] = "#RRGGBB" paper colour for the ADF's blank back
-# page ("" lets WIA decide).  Pages are written as TIFF (lossless, colour) or,
-# if the driver refuses TIFF, JPEG; multi-page TIFFs from a feeder are split
-# afterwards by the caller.
+# $args[2] = dpi, $args[3] = reserved (kept so the argument list stays stable).
+#
+# Design rules, learned the hard way against a real HP LaserJet M1005:
+#   * Only set properties that are *required* for every scanner and whose
+#     meaning is documented: CUR_INTENT, XRES, YRES.  Everything else is left
+#     to the driver's own defaults - SmartScan crops and deskews the page
+#     itself, so it does not need the scanner to.
+#   * Never write an out-of-range value.  1.1.1 wrote 0 to WIA_IPS_XEXTENT
+#     (6151) believing it was a deskew flag, and every scan died with
+#     E_INVALIDARG ("The parameter is incorrect").
+#   * Every property write is individually guarded, and a failure is recorded
+#     instead of aborting.
+#   * If the custom settings fail at all, reconnect (which restores defaults)
+#     and transfer again with nothing modified, then again at a lower
+#     resolution.  A scan at 200 DPI beats an error dialog.
+#   * Transfer format IDs must be correct: wiaFormatTIFF is ...CB1, not ...CB0
+#     (which is GIF).
 _ACQUIRE_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
 $deviceId = $args[0]
 $outDir   = $args[1]
-$dpi      = [int]$args[2]
-$paperBGR = $args[3]
-$log = New-Object System.Collections.ArrayList
-$count = 0
+$dpiWant  = [int]$args[2]
+
+# Documented property ids (WiaDef.h).  Only these three are ever written.
+$P_CUR_INTENT = "6146"   # WIA_IPS_CUR_INTENT  - flags; 1 = colour
+$P_XRES       = "6147"   # WIA_IPS_XRES        - dpi
+$P_YRES       = "6148"   # WIA_IPS_YRES        - dpi
+
+# FormatID constants (WIA Automation).  TIFF is CB1; CB0 is GIF.
+$FMT_TIFF = "{B96B3CB1-0728-11D3-9D7B-0000F81EF32E}"
+$FMT_PNG  = "{B96B3CAF-0728-11D3-9D7B-0000F81EF32E}"
+$FMT_BMP  = "{B96B3CAB-0728-11D3-9D7B-0000F81EF32E}"
+$FMT_JPEG = "{B96B3CAE-0728-11D3-9D7B-0000F81EF32E}"
+
+$applied  = New-Object System.Collections.ArrayList
+$rejected = New-Object System.Collections.ArrayList
+$count    = 0
+
+function Set-WiaProp($props, $id, $name, $value) {
+    # Best effort: an unsupported or out-of-range value must never stop a scan.
+    try {
+        if (-not $props.Exists($id)) { return $false }
+        $props.Item($id).Value = $value
+        [void]$applied.Add("$name=$value")
+        return $true
+    } catch {
+        [void]$rejected.Add("$name=$value (" + $_.Exception.Message + ")")
+        return $false
+    }
+}
+
+function Save-Page($item, $stem, $log) {
+    # Try formats in order of preference.  Some WIA 1.0 drivers reject TIFF
+    # outright and only handle BMP, so every candidate gets a chance.
+    foreach ($pair in @(
+        @($FMT_TIFF, ".tif"), @($FMT_PNG, ".png"),
+        @($FMT_BMP, ".bmp"),  @($FMT_JPEG, ".jpg"))) {
+        try {
+            $image = $item.Transfer($pair[0])
+            $image.SaveFile($stem + $pair[1])
+            return $pair[1]
+        } catch {
+            [void]$log.Add("format $($pair[1]) failed: " + $_.Exception.Message)
+        }
+    }
+    throw "The scanner refused to send the image in any supported format."
+}
+
 try {
     $dm = New-Object -ComObject WIA.DeviceManager
     $info = $null
@@ -123,38 +179,68 @@ try {
         if ([int]$i.Type -eq 1 -and [string]$i.DeviceID -eq $deviceId) { $info = $i; break }
     }
     if ($null -eq $info) { throw "The scanner is no longer connected." }
+
     $device = $info.Connect()
     $feeder = $false
     try {
-        foreach ($item in $device.Items) {
-            if ($item.Properties.Exists("3088")) { $feeder = $true }
+        foreach ($it in $device.Items) {
+            if ($it.Properties.Exists("3088")) { $feeder = $true }
         }
     } catch { }
+    $log = New-Object System.Collections.ArrayList
 
     $maxPages = 50
     while ($count -lt $maxPages) {
-        # 4 = first page only (flatbed); 1 = next page (feeder)
-        $scanType = if ($feeder) { 1 } else { 4 }
-        $item = $device.Items.Item(1)
-        $props = $item.Properties
-        if ($props.Exists("6146")) { $props.Item("6146").Value = 1 }        # colour
-        if ($props.Exists("6147")) { $props.Item("6147").Value = $dpi }     # horizontal DPI
-        if ($props.Exists("6148")) { $props.Item("6148").Value = $dpi }     # vertical DPI
-        if ($props.Exists("6151")) { $props.Item("6151").Value = 0 }        # no automatic deskew
-        if ($props.Exists("6155")) { $props.Item("6155").Value = 1 }        # light source on
-        if ($paperBGR -ne "" -and $props.Exists("3100")) {
-            $props.Item("3100").Value = $paperBGR
-        }
-        $file = Join-Path $outDir ("page_{0:D3}" -f $count)
+        $stem = Join-Path $outDir ("page_{0:D3}" -f $count)
+        $saved = $null
+
+        # 1. The requested settings.
         try {
-            $image = $item.Transfer("{B96B3CB0-0728-11D3-9D7B-0000F81EF32E}")  # TIFF
-            $image.SaveFile($file + ".tif")
+            $item = $device.Items.Item(1)
+            $props = $item.Properties
+            [void](Set-WiaProp $props $P_CUR_INTENT "CUR_INTENT" 1)
+            [void](Set-WiaProp $props $P_XRES "XRES" $dpiWant)
+            [void](Set-WiaProp $props $P_YRES "YRES" $dpiWant)
+            $saved = Save-Page $item $stem $log
         } catch {
-            $image = $item.Transfer("{B96B3CAE-0728-11D3-9D7B-0000F81EF32E}")  # JPEG
-            $image.SaveFile($file + ".jpg")
+            [void]$log.Add("custom settings failed: " + $_.Exception.Message)
         }
+
+        # 2. Untouched driver defaults; reconnecting restores them.
+        if ($null -eq $saved) {
+            try {
+                $device = $info.Connect()
+                $item = $device.Items.Item(1)
+                $saved = Save-Page $item $stem $log
+                [void]$rejected.Add("used driver defaults (requested ${dpiWant} DPI)")
+            } catch {
+                [void]$log.Add("default settings failed: " + $_.Exception.Message)
+            }
+        }
+
+        # 3. A lower resolution, in case the extent is the problem.
+        if ($null -eq $saved -and $dpiWant -gt 200) {
+            try {
+                $device = $info.Connect()
+                $item = $device.Items.Item(1)
+                $props = $item.Properties
+                [void](Set-WiaProp $props $P_XRES "XRES" 200)
+                [void](Set-WiaProp $props $P_YRES "YRES" 200)
+                $saved = Save-Page $item $stem $log
+                [void]$rejected.Add("scanned at 200 DPI instead of ${dpiWant}")
+            } catch {
+                [void]$log.Add("200 DPI fallback failed: " + $_.Exception.Message)
+            }
+        }
+
+        if ($null -eq $saved) {
+            throw "The scanner could not send a page. " +
+                  (($log | Select-Object -Last 2) -join " ")
+        }
+
         $count++
-        [void]$log.Add("page $count saved")
+        [void]$log.Add("page $count saved as $saved")
+
         if (-not $feeder) { break }
         # WIA throws when the ADF runs dry; that is the normal end of a batch.
         # The status probe is best-effort: many drivers omit property 3088 and
@@ -168,21 +254,80 @@ try {
         if ($status -ne -1 -and $status -ne 1 -and $status -ne 5) { break }
         Start-Sleep -Milliseconds 400
     }
-    [pscustomobject]@{ ok = $true; pages = $count; feeder = $feeder; log = $log } |
-        ConvertTo-Json -Compress
+
+    [pscustomobject]@{
+        ok = $true; pages = $count; feeder = $feeder
+        applied = $applied; rejected = $rejected; log = $log
+    } | ConvertTo-Json -Compress
 } catch {
     $message = [string]$_.Exception.Message
     # "paper empty" after at least one page is a finished batch, not a failure.
     $dry = $message -match '(?i)paper|empty|no document|feed|0x8021006B|80210003'
     if ($count -gt 0 -and $dry) {
-        [pscustomobject]@{ ok = $true; pages = $count; feeder = $feeder; log = $log } |
-            ConvertTo-Json -Compress
+        [pscustomobject]@{
+            ok = $true; pages = $count; feeder = $feeder
+            applied = $applied; rejected = $rejected; log = $log
+        } | ConvertTo-Json -Compress
     } else {
         [pscustomobject]@{
             ok = $false; pages = $count; error = $message; feeder = $feeder
+            applied = $applied; rejected = $rejected; log = $log
         } | ConvertTo-Json -Compress
     }
 }
+"""
+
+
+# Diagnostics: dump every property the driver exposes, so a failure can be
+# diagnosed from one file instead of guesswork.
+_DIAGNOSE_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+$deviceId = $args[0]
+$lines = New-Object System.Collections.ArrayList
+try {
+    $dm = New-Object -ComObject WIA.DeviceManager
+    [void]$lines.Add("Windows:      " + [string][System.Environment]::OSVersion.VersionString)
+    [void]$lines.Add("PowerShell:   " + $PSVersionTable.PSVersion.ToString())
+    [void]$lines.Add("Devices found: " + $dm.DeviceInfos.Count)
+    $info = $null
+    foreach ($i in $dm.DeviceInfos) {
+        [void]$lines.Add("  - [" + $i.Type + "] " + $i.Properties.Item("Name").Value +
+                         "  id=" + $i.DeviceID)
+        if ([int]$i.Type -eq 1 -and [string]$i.DeviceID -eq $deviceId) { $info = $i }
+    }
+    if ($null -eq $info) { throw "That device is not attached." }
+    $device = $info.Connect()
+    [void]$lines.Add("")
+    [void]$lines.Add("Device properties:")
+    foreach ($p in $device.Properties) {
+        try { [void]$lines.Add(("  {0,-5} {1,-40} {2}" -f $p.PropertyID, $p.Name, $p.Value)) }
+        catch { [void]$lines.Add("  " + $p.PropertyID + " (unreadable)") }
+    }
+    [void]$lines.Add("")
+    [void]$lines.Add("Scan item properties (what acquisition can set):")
+    $item = $device.Items.Item(1)
+    foreach ($p in $item.Properties) {
+        $range = ""
+        try {
+            $sub = $p.SubType
+            if ($sub -eq 3) { $range = "range $($p.SubTypeMin) .. $($p.SubTypeMax) step $($p.SubTypeStep)" }
+            elseif ($sub -eq 4) {
+                $vals = @()
+                foreach ($v in $p.SubTypeValues) { $vals += [string]$v }
+                $range = "list [" + ($vals -join ", ") + "]"
+            } elseif ($sub -eq 2) { $range = "flag" }
+        } catch { }
+        $value = ""
+        try { $value = [string]$p.Value } catch { $value = "(unreadable)" }
+        [void]$lines.Add(("  {0,-5} {1,-40} = {2,-16} {3}" -f `
+            $p.PropertyID, $p.Name, $value, $range))
+    }
+    [void]$lines.Add("")
+    [void]$lines.Add("DIAGNOSE OK")
+} catch {
+    [void]$lines.Add("DIAGNOSE FAILED: " + $_.Exception.Message)
+}
+$lines -join "`n"
 """
 
 
@@ -348,28 +493,98 @@ class AcquireResult:
     pages: list[Path]
     feeder: bool = False
     warnings: list[str] = None  # type: ignore[assignment]
+    # Which properties the driver accepted / refused, for the diagnostics view.
+    applied: list[str] = None  # type: ignore[assignment]
+    rejected: list[str] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.warnings is None:
             self.warnings = []
+        if self.applied is None:
+            self.applied = []
+        if self.rejected is None:
+            self.rejected = []
+
+
+_PAGE_SUFFIXES = {".tif", ".tiff", ".jpg", ".jpeg", ".png", ".bmp"}
+
+
+def _as_list(value) -> list[str]:
+    """PowerShell serialises a one-element array as a bare string."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
+def verify_page(path: Path) -> bool:
+    """True when Pillow can decode *path* as an image.
+
+    Guards against a driver that accepts a format request but writes something
+    else: 1.1.1 asked for "TIFF" using the GIF GUID, so a file named .tif could
+    hold GIF bytes.  Cheap enough to run on every scanned page.
+    """
+    try:
+        from PIL import Image
+
+        with Image.open(path) as image:
+            image.load()
+            image.size  # noqa: B018 - forces header parsing
+        return True
+    except Exception:
+        return False
 
 
 def parse_acquire_output(output: str, folder: Path) -> AcquireResult:
     """Collect the files a finished acquisition left in *folder*."""
     payload = _last_json_object(output)
-    pages = sorted(
-        p for p in folder.glob("page_*") if p.suffix.lower() in {".tif", ".tiff", ".jpg", ".jpeg", ".png", ".bmp"}
-    )
+    raw_pages = sorted(p for p in folder.glob("page_*") if p.suffix.lower() in _PAGE_SUFFIXES)
     feeder = bool(payload.get("feeder"))
+    applied = _as_list(payload.get("applied"))
+    rejected = _as_list(payload.get("rejected"))
     if not payload.get("ok"):
         message = str(payload.get("error") or "The scanner reported an error.")
-        raise ScannerError(describe_wia_error(message), "Check the scanner, then try again.")
-    if not pages:
+        raise ScannerError(
+            describe_wia_error(message),
+            "Use \"Diagnose scanner\" to see what this driver supports, or "
+            "\"Add photos\" for images saved by the scanner's own software.",
+        )
+    # Only hand on pages that really decode; a mislabelled file is a bug worth
+    # reporting rather than a mystery "not a readable image" later.
+    readable: list[Path] = []
+    broken: list[str] = []
+    for page in raw_pages:
+        if verify_page(page):
+            readable.append(page)
+        else:
+            broken.append(page.name)
+    if not readable and raw_pages:
+        raise ScannerError(
+            f"The scanner sent {len(raw_pages)} image(s) that could not be read.",
+            "This is a driver problem. Use \"Diagnose scanner\" and send the report, "
+            "or \"Add photos\" with the scanner's own software.",
+        )
+    if not readable:
         raise ScannerError(
             "The scanner reported success but sent no image.",
             "If the document feeder is empty, load the pages and try again.",
         )
-    return AcquireResult(pages=pages, feeder=feeder)
+    warnings = _as_list(payload.get("warnings"))
+    if broken:
+        warnings.append("Skipped unreadable page(s): " + ", ".join(broken))
+    # Anything the driver refused is worth telling the user: "used driver
+    # defaults" explains why the scan may be lower-resolution than requested.
+    warnings.extend(w for w in rejected if w not in warnings)
+    return AcquireResult(
+        pages=readable,
+        feeder=feeder,
+        warnings=warnings,
+        applied=applied,
+        rejected=rejected,
+    )
 
 
 def describe_wia_error(message: str) -> str:
@@ -408,15 +623,11 @@ def acquire_pages(
     target = Path(folder) if folder is not None else Path(tempfile.mkdtemp(prefix="smartscan_scan_"))
     target.mkdir(parents=True, exist_ok=True)
     dpi = int(dpi) if int(dpi) in DPI_CHOICES else DEFAULT_DPI
-    # WIA wants BGR order in a "#BBGGRR" string; the UI speaks RGB.
-    paper = ""
-    if paper_hex:
-        value = paper_hex.lstrip("#")
-        if len(value) == 6:
-            paper = f"#{value[4:6]}{value[2:4]}{value[0:2]}"
     started = time.perf_counter()
+    # The fourth argument is reserved: the sheet colour for ADF blank-back
+    # elimination is deliberately not set (see the script's design notes).
     output = _run_powershell(
-        _ACQUIRE_SCRIPT, [device_id, str(target), str(dpi), paper], timeout=timeout
+        _ACQUIRE_SCRIPT, [device_id, str(target), str(dpi), ""], timeout=timeout
     )
     result = parse_acquire_output(output, target)
     if result.feeder and dpi >= 600:
@@ -427,6 +638,16 @@ def acquire_pages(
     if not result.pages:
         raise ScannerError("Nothing was scanned.", f"Gave up after {elapsed:.0f}s.")
     return result
+
+
+def diagnose(device: ScannerDevice | str, timeout: float = 120.0) -> str:
+    """Text report of everything the driver exposes for *device*.
+
+    This exists because the acquisition path cannot be tested without the
+    hardware: a report from the user's machine replaces guesswork.
+    """
+    device_id = device.device_id if isinstance(device, ScannerDevice) else str(device)
+    return _run_powershell(_DIAGNOSE_SCRIPT, [device_id], timeout=timeout)
 
 
 def split_multipage(path: Path) -> list[Path]:

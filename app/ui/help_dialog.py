@@ -40,7 +40,8 @@ GUIDE_HTML = """
 most work), then <b>Scan</b>. A document feeder pulls every page in the tray; on a flatbed
 press <b>Scan again</b> for another page. This uses the scanner support built into Windows,
 so no extra software is needed. If no scanner is listed, check it is switched on and
-connected, then press <b>Look again</b>.</p>
+connected, then press <b>Look again</b>. If a scan fails, <b>Diagnose…</b> saves a report of
+what the scanner driver supports — send it with any bug report.</p>
 
 <h3>Choosing the output folder</h3>
 <p>SmartScan remembers the folder you pick. Use <b>Change…</b> next to <b>Save to</b>, the
@@ -146,7 +147,9 @@ def write_guide_files(target_dir: Path) -> list[Path]:
         "SCANNER\n"
         "  Toolbar > 'Scan from scanner', pick the device and 300 DPI, press Scan.\n"
         "  A document feeder pulls every page; on a flatbed press 'Scan again'.\n"
-        "  Uses the scanner support built into Windows - no extra software.\n\n"
+        "  Uses the scanner support built into Windows - no extra software.\n"
+        "  If a scan fails, 'Diagnose...' saves a report of what the driver\n"
+        "  supports; send it with a bug report.\n\n"
         "OUTPUT FOLDER\n"
         "  'Change...' next to 'Save to', File > Choose output folder (Ctrl+D)\n"
         "  or Settings (Ctrl+,). Default: Documents\\SmartScan.\n\n"
