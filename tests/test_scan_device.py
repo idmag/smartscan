@@ -211,6 +211,11 @@ def test_arguments_are_stringified():
     assert command[-2:] == ["300", "True"]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="uses a POSIX shell as a stand-in for powershell.exe; the real "
+    "thing is exercised by the Windows CI job instead",
+)
 def test_arguments_reach_the_script_through_args(monkeypatch, tmp_path):
     """End-to-end on the script-file mechanism, without needing Windows.
 
@@ -222,17 +227,19 @@ def test_arguments_reach_the_script_through_args(monkeypatch, tmp_path):
     fake.write_text(
         '#!/bin/sh\n'
         'while [ $# -gt 0 ] && [ "$1" != "-File" ]; do shift; done\n'
-        'shift  # the script path itself\n'
-        'echo "{\\"ok\\": true, \\"argv\\": [\\"$@\\"]}"\n'
+        'shift  # consume -File itself\n'
+        'script="$1"  # the script path, in the slot -File puts it in\n'
+        'shift\n'
+        'echo "script: $script argv: $@"\n'
     )
     fake.chmod(0o755)
     monkeypatch.setattr(scan_device, "IS_WINDOWS", True)
     monkeypatch.setattr(scan_device, "_powershell_exe", lambda: str(fake))
 
     output = _run_powershell("ignored", ["first", "second"])
-    assert "first" in output and "second" in output
-    # ...and they arrive in order, after the script path.
-    assert output.index("first") < output.index("second")
+    assert "argv: first second" in output
+    # -File points at the temporary .ps1 that holds the script text.
+    assert ".ps1" in output
 
 
 # --------------------------------------------------- failure classification
