@@ -21,7 +21,9 @@ wizard.
 
 ## Install (Windows)
 
-1. Download `SmartScan-Setup-1.0.0.exe` from the [Releases](../../releases) page.
+1. Download
+   [`SmartScan-Setup-1.0.0.exe`](https://github.com/idmag/smartscan/releases/download/v1.0.0/SmartScan-Setup-1.0.0.exe)
+   from the [Releases](../../releases) page.
 2. Run it and follow the wizard. No administrator rights are needed for a per-user
    install; Python does not need to be installed.
 3. Start **SmartScan** from the Start menu or the desktop shortcut.
