@@ -95,10 +95,13 @@ jobs:
           Write-Host "Using $iscc"
           & $iscc "packaging\inno\smartscan.iss" 2>&1 | Tee-Object -FilePath iscc.log
           if ($LASTEXITCODE -ne 0) {
-            # Make the compiler's own message readable from the check-run
-            # annotations, which is often the only log channel available.
-            $err = (Get-Content iscc.log -Raw) -replace "`r?`n", " | "
-            $err = $err.Substring(0, [Math]::Min(1200, $err.Length))
+            # Surface just the compiler's diagnostics: the full log is long and
+            # check-run annotations truncate, so filter before reporting.
+            $lines = Get-Content iscc.log | Where-Object {
+              $_ -match 'Error|error|Warning|warning|Failed|failed|Line \d+|\[Files\]|\[Icons\]|\[Run\]|\[Registry\]'
+            }
+            $err = ($lines -join " | ")
+            $err = $err.Substring(0, [Math]::Min(3000, $err.Length))
             Write-Host "::error title=Inno Setup failed::$err"
             exit 1
           }
