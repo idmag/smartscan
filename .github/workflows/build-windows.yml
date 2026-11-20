@@ -70,25 +70,31 @@ jobs:
           # Start the app offscreen, let it initialise, then close it.  A missing
           # Qt plugin or a broken import crashes immediately and fails the build.
           $env:QT_QPA_PLATFORM = "offscreen"
-          $p = Start-Process -FilePath "dist/SmartScan/SmartScan.exe" -PassThru
+          $exe = "dist/SmartScan/SmartScan.exe"
+          if (-not (Test-Path $exe)) { Write-Host "Missing $exe"; exit 1 }
+          $p = Start-Process -FilePath $exe -PassThru
           Start-Sleep -Seconds 20
           if ($p.HasExited) {
             Write-Host "SmartScan exited during startup (code $($p.ExitCode))."
             exit 1
           }
-          Write-Host "SmartScan stayed running for 20s ($($p.Id))."
+          Write-Host "SmartScan stayed running for 20s (pid $($p.Id))."
           Stop-Process -Id $p.Id -Force
 
       - name: Install Inno Setup
-        run: |
-          choco install innosetup --no-progress -y
+        run: choco install innosetup --no-progress -y
 
       - name: Build installer
         shell: pwsh
         run: |
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $iscc = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "C:\Program Files\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { Write-Host "ISCC.exe not found"; exit 1 }
           & $iscc "packaging\inno\smartscan.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem dist\*.exe | Format-Table Name, Length
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
