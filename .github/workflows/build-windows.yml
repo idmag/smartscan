@@ -92,8 +92,16 @@ jobs:
             "C:\Program Files\Inno Setup 6\ISCC.exe"
           ) | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $iscc) { Write-Host "ISCC.exe not found"; exit 1 }
-          & $iscc "packaging\inno\smartscan.iss"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "Using $iscc"
+          & $iscc "packaging\inno\smartscan.iss" 2>&1 | Tee-Object -FilePath iscc.log
+          if ($LASTEXITCODE -ne 0) {
+            # Make the compiler's own message readable from the check-run
+            # annotations, which is often the only log channel available.
+            $err = (Get-Content iscc.log -Raw) -replace "`r?`n", " | "
+            $err = $err.Substring(0, [Math]::Min(1200, $err.Length))
+            Write-Host "::error title=Inno Setup failed::$err"
+            exit 1
+          }
           Get-ChildItem dist\*.exe | Format-Table Name, Length
 
       - name: Upload installer
