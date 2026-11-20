@@ -61,6 +61,17 @@ jobs:
           "version=$v" >> $env:GITHUB_OUTPUT
           Write-Host "SmartScan version $v"
 
+      - name: Check release notes exist
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $notes = "docs/release-notes-${{ steps.version.outputs.version }}.md"
+          if (-not (Test-Path $notes)) {
+            Write-Host "::error title=Missing release notes::$notes must exist for a tag build"
+            exit 1
+          }
+          Write-Host "Release notes: $notes"
+
       - name: Build executable
         run: pyinstaller packaging/smartscan.spec --noconfirm --log-level=WARN
 
@@ -162,4 +173,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/SmartScan-Setup-*.exe
-          generate_release_notes: true
+          # A tagged release uses docs/release-notes-<version>.md when present,
+          # so the download page says what changed instead of a bare changelog.
+          body_path: docs/release-notes-${{ steps.version.outputs.version }}.md
+          generate_release_notes: false

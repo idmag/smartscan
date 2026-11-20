@@ -135,6 +135,13 @@ class MainWindow(QMainWindow):
         self.act_scan.setToolTip("Scan every document and save to the chosen folder (Ctrl+S)")
         self.act_scan.triggered.connect(self.scan_and_save)
 
+        self.act_scan_device = QAction("Scan from scanner…", self)
+        self.act_scan_device.setShortcut("Ctrl+Shift+N")
+        self.act_scan_device.setToolTip(
+            "Scan pages directly from a scanner connected to this PC (Ctrl+Shift+N)"
+        )
+        self.act_scan_device.triggered.connect(self.scan_from_device)
+
         self.act_folder = QAction("Choose output folder…", self)
         self.act_folder.setShortcut("Ctrl+D")
         self.act_folder.triggered.connect(lambda: self.scan_bar._pick_folder())
@@ -310,6 +317,9 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.act_scan)
         file_menu.addAction(self.act_folder)
+        file_menu.addSeparator()
+        file_menu.addAction(self.act_scan_device)
+        file_menu.addSeparator()
         file_menu.addAction(self.act_open_folder)
         file_menu.addSeparator()
         file_menu.addAction(self.act_quit)
@@ -342,6 +352,10 @@ class MainWindow(QMainWindow):
 
         self.tb_add = self._tool_button("Add photos", self.open_dialog,
                                         "Add photos (Ctrl+O)")
+        self.tb_scan_device = self._tool_button(
+            "Scan from scanner", self.scan_from_device,
+            "Scan pages from a scanner attached to this PC (Ctrl+Shift+N)"
+        )
         self.tb_detect = self._tool_button("Re-detect", self.act_detect.trigger,
                                            "Run automatic detection again (Ctrl+R)")
         self.tb_exclude = self._tool_button("Exclude", self.toggle_current_excluded,
@@ -357,6 +371,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.tb_photo_name)
         toolbar.addSeparator()
         toolbar.addWidget(self.tb_add)
+        toolbar.addWidget(self.tb_scan_device)
         toolbar.addWidget(self.tb_detect)
         toolbar.addWidget(self.tb_exclude)
         toolbar.addSeparator()
@@ -463,6 +478,24 @@ class MainWindow(QMainWindow):
             self.select_photo(len(self.docs) - 1)
             self.statusBar().showMessage(
                 f"Added {loaded} photo{'s' if loaded != 1 else ''}.", 4000
+            )
+
+    # ------------------------------------------------------------ scanner
+    def scan_from_device(self) -> None:
+        """Scan pages from a scanner, then treat them as ordinary photos."""
+        from .scan_dialog import ScanDeviceDialog
+
+        dialog = ScanDeviceDialog(self.settings, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.page_files:
+            from .scan_dialog import keep_for_session
+
+            # The images sit in a temp folder this process owns; it is removed
+            # when the app exits, so DocPage.path stays valid meanwhile.
+            keep_for_session(dialog.page_files)
+            self.load_paths([Path(p) for p in dialog.page_files])
+            n = len(dialog.page_files)
+            self.statusBar().showMessage(
+                f"Scanned {n} page{'s' if n != 1 else ''}.", 5000
             )
 
     def paste_image(self) -> None:
