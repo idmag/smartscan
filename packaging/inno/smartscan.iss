@@ -75,5 +75,7 @@ Root: HKCU; Subkey: "Software\Classes\Applications\{#AppExeName}\SupportedTypes"
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; \
     Flags: nowait postinstall skipifsilent
-Filename: "{app}\HOW-TO-USE.md"; Description: "Open the How-to-use guide"; \
-    Flags: shellexec nowait postinstall skipifsilent unchecked
+; Notepad always exists, whereas a shell association for .md may not.
+Filename: "notepad.exe"; Parameters: """{app}\HOW-TO-USE.md"""; \
+    Description: "Open the How-to-use guide"; \
+    Flags: nowait postinstall skipifsilent unchecked

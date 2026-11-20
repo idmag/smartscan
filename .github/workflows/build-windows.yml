@@ -107,6 +107,48 @@ jobs:
           }
           Get-ChildItem dist\*.exe | Format-Table Name, Length
 
+      - name: Smoke-test the installer
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\SmartScan-Setup-*.exe | Select-Object -First 1
+          $dir = Join-Path $env:LOCALAPPDATA "SmartScanInstallTest"
+          Write-Host "Installing $($setup.Name) to $dir"
+          $proc = Start-Process -FilePath $setup.FullName -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+            "/DIR=$dir", "/LOG=$env:TEMP\install.log"
+          ) -PassThru -Wait
+          if ($proc.ExitCode -ne 0) {
+            Get-Content "$env:TEMP\install.log" -Tail 40
+            Write-Host "::error title=Installer failed::exit code $($proc.ExitCode)"
+            exit 1
+          }
+          $exe = Join-Path $dir "SmartScan.exe"
+          foreach ($f in @($exe, (Join-Path $dir "HOW-TO-USE.md"), (Join-Path $dir "assets\smartscan.ico"))) {
+            if (-not (Test-Path $f)) {
+              Write-Host "::error title=Installer incomplete::missing $f"
+              exit 1
+            }
+          }
+          Get-ChildItem $dir -Recurse -File | Measure-Object -Property Length -Sum |
+            ForEach-Object { Write-Host ("Installed {0} files, {1:N0} bytes" -f $_.Count, $_.Sum) }
+          # The installed copy must start too (catches a missing DLL next to the exe).
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) {
+            Write-Host "::error title=Installed app crashed::exit code $($p.ExitCode)"
+            exit 1
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "Installed app started and stayed running."
+          $uninst = Join-Path $dir "unins000.exe"
+          if (Test-Path $uninst) {
+            Start-Process -FilePath $uninst -ArgumentList @(
+              "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+            ) -Wait
+            Write-Host "Uninstalled."
+          }
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
