@@ -42,7 +42,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "associate"; Description: "Open image files with SmartScan ("Open with" entry)"; GroupDescription: "Integration:"; Flags: unchecked
+Name: "associate"; Description: "Add SmartScan to the Open with menu for images"; GroupDescription: "Integration:"; Flags: unchecked
 
 [Files]
 Source: "{#SourceDir}\*";             DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
